@@ -3841,6 +3841,9 @@ def prepare_sync():
         existing_sale_ids = set()
         existing_purchase_ids = set()
         
+        sheet_sale_count = 0
+        sheet_purchase_count = 0
+        
         if mode == 'append':
             try:
                 # Call getExistingUniqueIds from Google Sheets Web App once
@@ -3856,6 +3859,8 @@ def prepare_sync():
                     if res_data.get('success'):
                         existing_sale_ids = set(str(uid) for uid in res_data.get('saleIds', []))
                         existing_purchase_ids = set(str(uid) for uid in res_data.get('purchaseIds', []))
+                        sheet_sale_count = int(res_data.get('saleCount', len(existing_sale_ids)))
+                        sheet_purchase_count = int(res_data.get('purchaseCount', len(existing_purchase_ids)))
             except Exception as e:
                 print(f"Error fetching unique IDs from sheet: {str(e)}", flush=True)
                 # Fallback: check SQLite cache
@@ -3911,7 +3916,7 @@ def prepare_sync():
         cursor.execute("SELECT * FROM sale ORDER BY no ASC")
         skipped_sale = 0
         inserted_sale = 0
-        existing_sale_count = len(existing_sale_ids)
+        existing_sale_count = max(sheet_sale_count, len(existing_sale_ids)) if mode == 'append' else 0
         
         sale_batch = []
         for r in cursor:
@@ -3941,7 +3946,7 @@ def prepare_sync():
         cursor.execute("SELECT * FROM purchase ORDER BY no ASC")
         skipped_purchase = 0
         inserted_purchase = 0
-        existing_purchase_count = len(existing_purchase_ids)
+        existing_purchase_count = max(sheet_purchase_count, len(existing_purchase_ids)) if mode == 'append' else 0
         
         purchase_batch = []
         for r in cursor:

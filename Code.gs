@@ -378,6 +378,44 @@ function getExistingUniqueIds(sheetName) {
   }
 }
 
+// ─── Helper: Get Last Data Row for Sale (Columns 1 & 2) ─────────────────────
+function getLastRowForSale(sheet) {
+  var maxRow = sheet.getLastRow();
+  if (maxRow <= 2) return 2;
+  // Check Columns 1 & 2 (No. and Invoice No) from row 3 down to maxRow
+  var vals = sheet.getRange(3, 1, maxRow - 2, 2).getValues();
+  for (var r = vals.length - 1; r >= 0; r--) {
+    if ((vals[r][0] !== "" && vals[r][0] !== null && vals[r][0] !== undefined) ||
+        (vals[r][1] !== "" && vals[r][1] !== null && vals[r][1] !== undefined)) {
+      return r + 3; // 1-indexed row number
+    }
+  }
+  return 2;
+}
+
+// ─── Helper: Get Last Data Row for Purchase (Columns 40 & 41) ───────────────
+function getLastRowForPurchase(sheet) {
+  var maxRow = sheet.getLastRow();
+  if (maxRow <= 2) return 2;
+  // Check Columns 40 & 41 (No. and Invoice No) from row 3 down to maxRow
+  var vals = sheet.getRange(3, 40, maxRow - 2, 2).getValues();
+  for (var r = vals.length - 1; r >= 0; r--) {
+    if ((vals[r][0] !== "" && vals[r][0] !== null && vals[r][0] !== undefined) ||
+        (vals[r][1] !== "" && vals[r][1] !== null && vals[r][1] !== undefined)) {
+      return r + 3; // 1-indexed row number
+    }
+  }
+  return 2;
+}
+
+// ─── Helper: Ensure sheet has enough rows before writing ───────────────────
+function ensureSheetCapacity(sheet, requiredRows) {
+  var maxRows = sheet.getMaxRows();
+  if (requiredRows > maxRows) {
+    sheet.insertRowsAfter(maxRows, requiredRows - maxRows);
+  }
+}
+
 // ─── Write Data to Sheet (Batched) ──────────────────────────────────────────
 function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
   try {
@@ -389,7 +427,8 @@ function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
       sheet = ss.insertSheet(sheetName);
     }
     
-    var startRow;
+    var saleStartRow = 3;
+    var purchaseStartRow = 3;
     
     if (!isAppend || sheet.getLastRow() <= 2) {
       // Fresh write: Clear and write headers first
@@ -456,10 +495,21 @@ function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
           .setHorizontalAlignment('center');
       }
       
-      startRow = 3;
+      saleStartRow = 3;
+      purchaseStartRow = 3;
     } else {
-      // Append mode: Find next empty row
-      startRow = sheet.getLastRow() + 1;
+      // Append mode: Find next empty row independently for Sale and Purchase
+      saleStartRow = getLastRowForSale(sheet) + 1;
+      purchaseStartRow = getLastRowForPurchase(sheet) + 1;
+    }
+    
+    // Ensure sheet has enough row capacity
+    var requiredRows = Math.max(
+      saleRows && saleRows.length > 0 ? (saleStartRow + saleRows.length - 1) : 0,
+      purchaseRows && purchaseRows.length > 0 ? (purchaseStartRow + purchaseRows.length - 1) : 0
+    );
+    if (requiredRows > 0) {
+      ensureSheetCapacity(sheet, requiredRows);
     }
     
     // Write SALE data
@@ -468,7 +518,7 @@ function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
       for (var i = 0; i < saleRows.length; i += batchSize) {
         var batch = saleRows.slice(i, i + batchSize);
         var numCols = batch[0].length;
-        sheet.getRange(startRow + i, 1, batch.length, numCols).setValues(batch);
+        sheet.getRange(saleStartRow + i, 1, batch.length, numCols).setValues(batch);
       }
     }
     
@@ -479,7 +529,7 @@ function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
         var batch = purchaseRows.slice(i, i + batchSize);
         var numCols = batch[0].length;
         // Purchase starts at column 40
-        sheet.getRange(startRow + i, 40, batch.length, numCols).setValues(batch);
+        sheet.getRange(purchaseStartRow + i, 40, batch.length, numCols).setValues(batch);
       }
     }
     
@@ -504,6 +554,8 @@ function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
       message: 'Data written successfully!',
       saleRows: saleRows ? saleRows.length : 0,
       purchaseRows: purchaseRows ? purchaseRows.length : 0,
+      saleStartRow: saleStartRow,
+      purchaseStartRow: purchaseStartRow,
       sheetName: sheetName
     };
   } catch (e) {
@@ -579,22 +631,26 @@ function appendBatch(sheetName, saleRows, purchaseRows, batchIndex, totalBatches
           .setBackground('#BBDEFB')
           .setHorizontalAlignment('center');
       }
-      
-      lastRow = 2;
     }
     
-    var startRow = lastRow + 1;
+    // Determine start row independently for Sale and Purchase so no rows are skipped
+    var saleStartRow = getLastRowForSale(sheet) + 1;
+    var purchaseStartRow = getLastRowForPurchase(sheet) + 1;
+    
+    // Ensure sheet has enough row capacity
+    var requiredRows = Math.max(
+      saleRows && saleRows.length > 0 ? (saleStartRow + saleRows.length - 1) : 0,
+      purchaseRows && purchaseRows.length > 0 ? (purchaseStartRow + purchaseRows.length - 1) : 0
+    );
+    if (requiredRows > 0) {
+      ensureSheetCapacity(sheet, requiredRows);
+    }
     
     if (saleRows && saleRows.length > 0) {
-      sheet.getRange(startRow, 1, saleRows.length, saleRows[0].length).setValues(saleRows);
+      sheet.getRange(saleStartRow, 1, saleRows.length, saleRows[0].length).setValues(saleRows);
     }
     
     if (purchaseRows && purchaseRows.length > 0) {
-      // Ensure we write at the same row position for purchase data
-      var purchaseStartRow = startRow;
-      if (saleRows && saleRows.length > 0) {
-        purchaseStartRow = startRow; // Same row, different column
-      }
       sheet.getRange(purchaseStartRow, 40, purchaseRows.length, purchaseRows[0].length).setValues(purchaseRows);
     }
     
@@ -612,6 +668,8 @@ function appendBatch(sheetName, saleRows, purchaseRows, batchIndex, totalBatches
       success: true,
       batchIndex: batchIndex,
       totalBatches: totalBatches,
+      saleStartRow: saleStartRow,
+      purchaseStartRow: purchaseStartRow,
       rowsWritten: Math.max(saleRows ? saleRows.length : 0, purchaseRows ? purchaseRows.length : 0)
     };
   } catch (e) {
