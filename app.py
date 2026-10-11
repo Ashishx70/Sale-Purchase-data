@@ -4117,24 +4117,23 @@ def send_sync_chunk():
         b_tot = payload.get('totalBatches', '?')
         s_cnt = len(payload.get('saleRows', []))
         p_cnt = len(payload.get('purchaseRows', []))
-        print(f"[SYNC CHUNK] 📤 Uploading Batch {b_idx}/{b_tot} to Google Sheets (Sales: {s_cnt}, Purchases: {p_cnt})...", flush=True)
+        print(f"Uploading Batch {b_idx}/{b_tot}...", flush=True)
         
         response = requests.post(web_app_url, json=payload, timeout=180)
         if response.status_code != 200:
-            print(f"[SYNC CHUNK ERROR] ❌ Google Apps Script HTTP status {response.status_code}: {response.text[:200]}", flush=True)
+            print(f"❌ Error in Batch {b_idx}/{b_tot}: Google Apps Script HTTP {response.status_code}", flush=True)
             return jsonify({'success': False, 'error': f'Google Apps Script returned status {response.status_code}'}), 500
             
         try:
             result = response.json()
         except Exception:
-            print(f"[SYNC CHUNK ERROR] ❌ Google Apps Script returned non-JSON: {response.text[:200]}", flush=True)
+            print(f"❌ Error in Batch {b_idx}/{b_tot}: Non-JSON response", flush=True)
             return jsonify({'success': False, 'error': f'Google Apps Script returned invalid response (HTML/Text): {response.text[:150]}'}), 500
 
         if result.get('success'):
-            print(f"[SYNC CHUNK SUCCESS] ✅ Batch {b_idx}/{b_tot} written successfully to Google Sheet!", flush=True)
-            print(f"[DATABASE] 💾 Updated to Database: Batch {b_idx}/{b_tot} ({s_cnt} Sales, {p_cnt} Purchases) saved successfully!\n", flush=True)
+            print(f"data update to database (Batch {b_idx}/{b_tot})", flush=True)
         else:
-            print(f"[SYNC CHUNK ERROR] ⚠️ Google Apps Script error: {result.get('error')}", flush=True)
+            print(f"❌ Error in Batch {b_idx}/{b_tot}: {result.get('error')}", flush=True)
         return jsonify(result)
     except Exception as e:
         print(f"[SYNC CHUNK EXCEPTION] ❌ {str(e)}", flush=True)

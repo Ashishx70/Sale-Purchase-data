@@ -1287,9 +1287,8 @@ async function startSyncToGoogleSheets() {
                 console.error(`[SYNC ERROR] Batch ${i}/${totalBatches} failed:`, resJSON);
                 throw new Error(resJSON.error || `Batch ${i} failed`);
             }
-            console.log(`[SYNC SUCCESS] Batch ${i}/${totalBatches} synced successfully:`, resJSON);
-            console.log(`[DATABASE] 💾 Updated to Database: Batch ${i}/${totalBatches} synced successfully!`);
-            showGlobalLoader('Syncing to Google Sheets', `Batch ${i} of ${totalBatches} - Updated to Database (${percent}%)`);
+            console.log(`data update to database (Batch ${i}/${totalBatches})`);
+            showGlobalLoader('Syncing to Google Sheets', `Batch ${i} of ${totalBatches} - data update to database (${percent}%)`);
         }
         
         // Done! Hide loader and show success modal
