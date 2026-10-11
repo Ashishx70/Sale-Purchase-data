@@ -4117,15 +4117,11 @@ def send_sync_chunk():
         b_tot = payload.get('totalBatches', '?')
         s_cnt = len(payload.get('saleRows', []))
         p_cnt = len(payload.get('purchaseRows', []))
-        print(f"\n[Batch {b_idx}/{b_tot}] Uploading {s_cnt} Sales, {p_cnt} Purchases...", flush=True)
-        
-        # Continuous heartbeat printing so terminal never pauses/stops while Google Sheets updates
+        # Continuous printing: only 'data database me update ho raha he'
         stop_ticker = threading.Event()
         def live_heartbeat():
-            sec = 0
             while not stop_ticker.wait(2.0):
-                sec += 2
-                print(f"  -> data database me update ho raha he... ({sec}s)", flush=True)
+                print("data database me update ho raha he", flush=True)
                 
         ticker_thread = threading.Thread(target=live_heartbeat, daemon=True)
         ticker_thread.start()
@@ -4137,19 +4133,15 @@ def send_sync_chunk():
             ticker_thread.join(timeout=1.0)
         
         if response.status_code != 200:
-            print(f"❌ Error in Batch {b_idx}/{b_tot}: Google Apps Script HTTP {response.status_code}", flush=True)
             return jsonify({'success': False, 'error': f'Google Apps Script returned status {response.status_code}'}), 500
             
         try:
             result = response.json()
         except Exception:
-            print(f"❌ Error in Batch {b_idx}/{b_tot}: Non-JSON response", flush=True)
             return jsonify({'success': False, 'error': f'Google Apps Script returned invalid response (HTML/Text): {response.text[:150]}'}), 500
 
         if result.get('success'):
-            print(f"✅ data update to database (Batch {b_idx}/{b_tot} done!)\n", flush=True)
-        else:
-            print(f"❌ Error in Batch {b_idx}/{b_tot}: {result.get('error')}\n", flush=True)
+            print("data database me update ho raha he", flush=True)
         return jsonify(result)
     except Exception as e:
         print(f"[SYNC CHUNK EXCEPTION] ❌ {str(e)}", flush=True)

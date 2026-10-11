@@ -1276,10 +1276,8 @@ async function startSyncToGoogleSheets() {
             // Call Google Apps Script via backend proxy to bypass CORS / redirect errors
             console.log(`[SYNC] Uploading batch ${i}/${totalBatches} (Sales: ${saleChunk.length}, Purchases: ${purchaseChunk.length})...`);
             
-            let liveSec = 0;
             const liveTimer = setInterval(() => {
-                liveSec++;
-                showGlobalLoader('Syncing to Database', `Batch ${i} of ${totalBatches}: data database me update ho raha he... (${liveSec}s)`);
+                showGlobalLoader('Syncing Data', 'data database me update ho raha he');
             }, 1000);
             
             let okSend = false, resJSON = null;
@@ -1302,8 +1300,8 @@ async function startSyncToGoogleSheets() {
                 console.error(`[SYNC ERROR] Batch ${i}/${totalBatches} failed:`, resJSON);
                 throw new Error(resJSON.error || `Batch ${i} failed`);
             }
-            console.log(`data update to database (Batch ${i}/${totalBatches})`);
-            showGlobalLoader('Syncing to Database', `Batch ${i} of ${totalBatches} - data update to database (${percent}%)`);
+            console.log('data database me update ho raha he');
+            showGlobalLoader('Syncing Data', 'data database me update ho raha he');
         }
         
         // Done! Hide loader and show success modal
