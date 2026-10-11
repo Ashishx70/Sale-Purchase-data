@@ -4132,6 +4132,7 @@ def send_sync_chunk():
 
         if result.get('success'):
             print(f"[SYNC CHUNK SUCCESS] ✅ Batch {b_idx}/{b_tot} written successfully to Google Sheet!", flush=True)
+            print(f"[DATABASE] 💾 Updated to Database: Batch {b_idx}/{b_tot} ({s_cnt} Sales, {p_cnt} Purchases) saved successfully!\n", flush=True)
         else:
             print(f"[SYNC CHUNK ERROR] ⚠️ Google Apps Script error: {result.get('error')}", flush=True)
         return jsonify(result)
