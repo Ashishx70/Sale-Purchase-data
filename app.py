@@ -4113,16 +4113,21 @@ def send_sync_chunk():
             print("[SYNC CHUNK ERROR] ❌ Missing webAppUrl or payload in request", flush=True)
             return jsonify({'success': False, 'error': 'Missing webAppUrl or payload'}), 400
             
-        b_idx = payload.get('batchIndex', '?')
-        b_tot = payload.get('totalBatches', '?')
-        s_cnt = len(payload.get('saleRows', []))
-        p_cnt = len(payload.get('purchaseRows', []))
-        # Continuous printing in English with live timestamp
+        try:
+            b_idx = int(payload.get('batchIndex', 1))
+            b_tot = int(payload.get('totalBatches', 1))
+            remaining = max(0, b_tot - b_idx)
+        except Exception:
+            b_idx = payload.get('batchIndex', '?')
+            b_tot = payload.get('totalBatches', '?')
+            remaining = '?'
+
+        # Continuous printing in English with live timestamp & remaining batches
         stop_ticker = threading.Event()
         def live_heartbeat():
             while not stop_ticker.wait(2.0):
                 now_str = datetime.now().strftime("%I:%M:%S %p")
-                print(f"[{now_str}] Updating data to database...", flush=True)
+                print(f"[{now_str}] Updating data to database... (Batch {b_idx}/{b_tot} | Remaining: {remaining})", flush=True)
                 
         ticker_thread = threading.Thread(target=live_heartbeat, daemon=True)
         ticker_thread.start()
@@ -4143,7 +4148,7 @@ def send_sync_chunk():
 
         if result.get('success'):
             now_str = datetime.now().strftime("%I:%M:%S %p")
-            print(f"[{now_str}] Updating data to database...", flush=True)
+            print(f"[{now_str}] Updating data to database... (Batch {b_idx}/{b_tot} done | Remaining: {remaining})", flush=True)
         return jsonify(result)
     except Exception as e:
         print(f"[SYNC CHUNK EXCEPTION] ❌ {str(e)}", flush=True)
