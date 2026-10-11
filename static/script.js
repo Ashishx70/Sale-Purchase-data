@@ -1275,20 +1275,35 @@ async function startSyncToGoogleSheets() {
             
             // Call Google Apps Script via backend proxy to bypass CORS / redirect errors
             console.log(`[SYNC] Uploading batch ${i}/${totalBatches} (Sales: ${saleChunk.length}, Purchases: ${purchaseChunk.length})...`);
-            const { ok: okSend, data: resJSON } = await safeFetchJson('/api/send-sync-chunk', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    webAppUrl: activeUrl,
-                    payload: payload
-                })
-            });
+            
+            let liveSec = 0;
+            const liveTimer = setInterval(() => {
+                liveSec++;
+                showGlobalLoader('Syncing to Database', `Batch ${i} of ${totalBatches}: data database me update ho raha he... (${liveSec}s)`);
+            }, 1000);
+            
+            let okSend = false, resJSON = null;
+            try {
+                const res = await safeFetchJson('/api/send-sync-chunk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        webAppUrl: activeUrl,
+                        payload: payload
+                    })
+                });
+                okSend = res.ok;
+                resJSON = res.data;
+            } finally {
+                clearInterval(liveTimer);
+            }
+            
             if (!okSend || !resJSON.success) {
                 console.error(`[SYNC ERROR] Batch ${i}/${totalBatches} failed:`, resJSON);
                 throw new Error(resJSON.error || `Batch ${i} failed`);
             }
             console.log(`data update to database (Batch ${i}/${totalBatches})`);
-            showGlobalLoader('Syncing to Google Sheets', `Batch ${i} of ${totalBatches} - data update to database (${percent}%)`);
+            showGlobalLoader('Syncing to Database', `Batch ${i} of ${totalBatches} - data update to database (${percent}%)`);
         }
         
         // Done! Hide loader and show success modal
