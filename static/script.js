@@ -1258,6 +1258,7 @@ async function startSyncToGoogleSheets() {
             };
             
             // Call Google Apps Script via local backend proxy to bypass browser CORS / redirect errors
+            console.log(`[SYNC] Uploading batch ${i}/${totalBatches} (Sales: ${saleChunk.length}, Purchases: ${purchaseChunk.length})...`);
             const response = await fetch('/api/send-sync-chunk', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1267,7 +1268,11 @@ async function startSyncToGoogleSheets() {
                 })
             });
             const resJSON = await response.json();
-            if (!response.ok || !resJSON.success) throw new Error(resJSON.error || `Batch ${i} failed`);
+            if (!response.ok || !resJSON.success) {
+                console.error(`[SYNC ERROR] Batch ${i}/${totalBatches} failed:`, resJSON);
+                throw new Error(resJSON.error || `Batch ${i} failed`);
+            }
+            console.log(`[SYNC SUCCESS] Batch ${i}/${totalBatches} synced successfully:`, resJSON);
         }
         
         // Done! Hide loader and show success modal
@@ -1304,6 +1309,7 @@ async function startSyncToGoogleSheets() {
         }
         
     } catch(e) {
+        console.error('[SYNC FAILED]:', e);
         hideGlobalLoader();
         if (progBar) progBar.style.display = 'none';
         showToast('❌', 'Sync Error: ' + e.message);

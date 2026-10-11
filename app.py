@@ -3678,22 +3678,27 @@ def upload_files():
     """Handle file uploads, process data, merge with existing, deduplicate."""
     file_paths = {}
     try:
+        print("\n[UPLOAD] 📥 4 Excel files received. Processing & Deduplicating...", flush=True)
         required_files = ['sale_details', 'sale_summary', 'purchase_details', 'purchase_summary']
         
         for file_key in required_files:
             if file_key not in request.files:
+                print(f"[UPLOAD ERROR] ❌ Missing file: {file_key}", flush=True)
                 return jsonify({'error': f'Missing file: {file_key}'}), 400
             
             file = request.files[file_key]
             if file.filename == '':
+                print(f"[UPLOAD ERROR] ❌ No file selected for: {file_key}", flush=True)
                 return jsonify({'error': f'No file selected for: {file_key}'}), 400
             
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], f'{file_key}_{file.filename}')
             file.save(filepath)
             file_paths[file_key] = filepath
+            print(f"  -> Received {file_key}: {file.filename}", flush=True)
         
         # Process and save new uploaded files directly using streaming
         stats = process_and_save_streaming(file_paths)
+        print(f"[UPLOAD SUCCESS] ✅ Sales: +{stats['sale_new']} new ({stats['sale_duplicates']} dups skipped) | Purchases: +{stats['purchase_new']} new ({stats['purchase_duplicates']} dups skipped)", flush=True)
         
         # Clean up uploaded files to save disk space
         for path in file_paths.values():
@@ -3722,6 +3727,7 @@ def upload_files():
             'purchase_preview': preview_purchase,
         })
     except Exception as e:
+        print(f"[UPLOAD ERROR] ❌ Exception during upload: {str(e)}", flush=True)
         # Clean up files in case of error as well!
         for path in file_paths.values():
             try:
@@ -3862,9 +3868,12 @@ def prepare_sync():
         sheet_name = req_data.get('sheetName')
         mode = req_data.get('mode', 'append')
         
+        print(f"\n[SYNC PREPARE] 🔄 Target Sheet: '{sheet_name}', Mode: '{mode}'...", flush=True)
         if not web_app_url:
+            print("[SYNC PREPARE ERROR] ❌ Google Web App URL is required", flush=True)
             return jsonify({'error': 'Google Web App URL is required'}), 400
         if not sheet_name:
+            print("[SYNC PREPARE ERROR] ❌ Target Sheet Name is required", flush=True)
             return jsonify({'error': 'Target Sheet Name is required'}), 400
             
         existing_sale_ids = set()
@@ -4008,6 +4017,7 @@ def prepare_sync():
         import gc
         gc.collect()
         
+        print(f"[SYNC PREPARE SUCCESS] ✅ Ready to sync: {inserted_sale} sales, {inserted_purchase} purchases. (Skipped: {skipped_sale} sales, {skipped_purchase} purchases)", flush=True)
         return jsonify({
             'success': True,
             'originalSale': original_sale_count,
@@ -4018,6 +4028,7 @@ def prepare_sync():
             'toSyncPurchase': inserted_purchase,
         })
     except Exception as e:
+        print(f"[SYNC PREPARE ERROR] ❌ Exception in prepare_sync: {str(e)}", flush=True)
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
@@ -4099,15 +4110,28 @@ def send_sync_chunk():
         payload = data.get('payload')
         
         if not web_app_url or not payload:
+            print("[SYNC CHUNK ERROR] ❌ Missing webAppUrl or payload in request", flush=True)
             return jsonify({'success': False, 'error': 'Missing webAppUrl or payload'}), 400
             
+        b_idx = payload.get('batchIndex', '?')
+        b_tot = payload.get('totalBatches', '?')
+        s_cnt = len(payload.get('saleRows', []))
+        p_cnt = len(payload.get('purchaseRows', []))
+        print(f"[SYNC CHUNK] 📤 Uploading Batch {b_idx}/{b_tot} to Google Sheets (Sales: {s_cnt}, Purchases: {p_cnt})...", flush=True)
+        
         response = requests.post(web_app_url, json=payload, timeout=180)
         if response.status_code != 200:
+            print(f"[SYNC CHUNK ERROR] ❌ Google Apps Script HTTP status {response.status_code}: {response.text[:200]}", flush=True)
             return jsonify({'success': False, 'error': f'Google Apps Script returned status {response.status_code}'}), 500
             
         result = response.json()
+        if result.get('success'):
+            print(f"[SYNC CHUNK SUCCESS] ✅ Batch {b_idx}/{b_tot} written successfully to Google Sheet!", flush=True)
+        else:
+            print(f"[SYNC CHUNK ERROR] ⚠️ Google Apps Script error: {result.get('error')}", flush=True)
         return jsonify(result)
     except Exception as e:
+        print(f"[SYNC CHUNK EXCEPTION] ❌ {str(e)}", flush=True)
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
