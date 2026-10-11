@@ -4124,7 +4124,12 @@ def send_sync_chunk():
             print(f"[SYNC CHUNK ERROR] ❌ Google Apps Script HTTP status {response.status_code}: {response.text[:200]}", flush=True)
             return jsonify({'success': False, 'error': f'Google Apps Script returned status {response.status_code}'}), 500
             
-        result = response.json()
+        try:
+            result = response.json()
+        except Exception:
+            print(f"[SYNC CHUNK ERROR] ❌ Google Apps Script returned non-JSON: {response.text[:200]}", flush=True)
+            return jsonify({'success': False, 'error': f'Google Apps Script returned invalid response (HTML/Text): {response.text[:150]}'}), 500
+
         if result.get('success'):
             print(f"[SYNC CHUNK SUCCESS] ✅ Batch {b_idx}/{b_tot} written successfully to Google Sheet!", flush=True)
         else:

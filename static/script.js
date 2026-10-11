@@ -1179,6 +1179,24 @@ async function refreshSyncDropdown() {
     } catch(e) { console.error(e); }
 }
 
+async function safeFetchJson(url, options = {}) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch (err) {
+        if (text.includes('<!DOCTYPE') || text.includes('<html') || text.includes('<html>')) {
+            if (response.status === 502 || response.status === 503 || response.status === 504) {
+                throw new Error(`Server abhi restart / deploy ho raha hai (Render ${response.status}). Kripya 20-30 seconds wait karke page refresh karein aur dubara Sync karein.`);
+            }
+            throw new Error(`Server ne HTML page return kiya (HTTP ${response.status}). Kripya page refresh karke dubara try karein.`);
+        }
+        throw new Error(text.substring(0, 150) || `Server error (${response.status})`);
+    }
+    return { ok: response.ok, status: response.status, data };
+}
+
 async function startSyncToGoogleSheets() {
     const sel = document.getElementById('sync-sheet-select');
     const sheetName = sel?.value||'';
@@ -1199,13 +1217,12 @@ async function startSyncToGoogleSheets() {
     
     try {
         // Fetch deduplicated counts from local backend (creates temp tables)
-        const syncRes = await fetch('/api/prepare-sync', {
+        const { ok: okPrep, data: syncData } = await safeFetchJson('/api/prepare-sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ webAppUrl: activeUrl, sheetName, mode })
         });
-        const syncData = await syncRes.json();
-        if (!syncRes.ok || syncData.error) throw new Error(syncData.error || 'Deduplication failed');
+        if (!okPrep || syncData.error) throw new Error(syncData.error || 'Deduplication failed');
         
         const toSyncSale = syncData.toSyncSale || 0;
         const toSyncPurchase = syncData.toSyncPurchase || 0;
@@ -1238,9 +1255,8 @@ async function startSyncToGoogleSheets() {
             if (progFill) progFill.style.width = percent + '%';
             
             // Fetch chunk from SQLite
-            const chunkRes = await fetch(`/api/get-sync-chunk?offset=${startIdx}&limit=${chunkSize}`);
-            const chunkData = await chunkRes.json();
-            if (!chunkRes.ok || chunkData.error) throw new Error(chunkData.error || `Failed to load batch ${i}`);
+            const { ok: okChunk, data: chunkData } = await safeFetchJson(`/api/get-sync-chunk?offset=${startIdx}&limit=${chunkSize}`);
+            if (!okChunk || chunkData.error) throw new Error(chunkData.error || `Failed to load batch ${i}`);
             
             const saleChunk = chunkData.saleRows || [];
             const purchaseChunk = chunkData.purchaseRows || [];
@@ -1257,9 +1273,9 @@ async function startSyncToGoogleSheets() {
                 totalBatches: totalBatches
             };
             
-            // Call Google Apps Script via local backend proxy to bypass browser CORS / redirect errors
+            // Call Google Apps Script via backend proxy to bypass CORS / redirect errors
             console.log(`[SYNC] Uploading batch ${i}/${totalBatches} (Sales: ${saleChunk.length}, Purchases: ${purchaseChunk.length})...`);
-            const response = await fetch('/api/send-sync-chunk', {
+            const { ok: okSend, data: resJSON } = await safeFetchJson('/api/send-sync-chunk', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1267,8 +1283,7 @@ async function startSyncToGoogleSheets() {
                     payload: payload
                 })
             });
-            const resJSON = await response.json();
-            if (!response.ok || !resJSON.success) {
+            if (!okSend || !resJSON.success) {
                 console.error(`[SYNC ERROR] Batch ${i}/${totalBatches} failed:`, resJSON);
                 throw new Error(resJSON.error || `Batch ${i} failed`);
             }
