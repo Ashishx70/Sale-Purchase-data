@@ -3,19 +3,27 @@
    Frontend Logic — Slim Upload, Full Width, Universal Search
    ═══════════════════════════════════════════════════════════════════════ */
 
-const DEFAULT_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwNUZf-kOwrze7bJOa89vHU1J2atjsyCTt3lQ7E15KJptTsBJ3g4tUH0MqnhSt-LHhoCw/exec';
+const DEFAULT_WEB_APP_URL_25_26 = 'https://script.google.com/macros/s/AKfycbwNUZf-kOwrze7bJOa89vHU1J2atjsyCTt3lQ7E15KJptTsBJ3g4tUH0MqnhSt-LHhoCw/exec';
+const DEFAULT_WEB_APP_URL_26_27 = 'https://script.google.com/macros/s/AKfycbyWMb69Xfk-Gkkp5Ye5mYCE8DoFUG0ua804LBlLErACpGPBAh1yZc3UhaIcRWvaiMGA/exec';
+
+const DEFAULT_SHEET_URL_25_26 = 'https://docs.google.com/spreadsheets/d/1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To/edit';
+const DEFAULT_SHEET_URL_26_27 = 'https://docs.google.com/spreadsheets/d/1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w/edit';
 
 function getSavedFyUrls() {
     try {
         const stored = localStorage.getItem('sale_purchase_fy_urls');
         if (stored) {
             const parsed = JSON.parse(stored);
-            if (parsed && typeof parsed === 'object') return parsed;
+            if (parsed && typeof parsed === 'object') {
+                if (!parsed['2025-26']) parsed['2025-26'] = DEFAULT_WEB_APP_URL_25_26;
+                if (!parsed['2026-27']) parsed['2026-27'] = DEFAULT_WEB_APP_URL_26_27;
+                return parsed;
+            }
         }
     } catch(e) {}
     return {
-        '2025-26': DEFAULT_WEB_APP_URL,
-        '2026-27': ''
+        '2025-26': DEFAULT_WEB_APP_URL_25_26,
+        '2026-27': DEFAULT_WEB_APP_URL_26_27
     };
 }
 
@@ -25,41 +33,92 @@ function saveFyUrls(urlsObj) {
     } catch(e) {}
 }
 
+function getSavedFySheetUrls() {
+    try {
+        const stored = localStorage.getItem('sale_purchase_fy_sheet_urls');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === 'object') {
+                if (!parsed['2025-26']) parsed['2025-26'] = DEFAULT_SHEET_URL_25_26;
+                if (!parsed['2026-27']) parsed['2026-27'] = DEFAULT_SHEET_URL_26_27;
+                return parsed;
+            }
+        }
+    } catch(e) {}
+    return {
+        '2025-26': DEFAULT_SHEET_URL_25_26,
+        '2026-27': DEFAULT_SHEET_URL_26_27
+    };
+}
+
+function saveFySheetUrls(sheetUrlsObj) {
+    try {
+        localStorage.setItem('sale_purchase_fy_sheet_urls', JSON.stringify(sheetUrlsObj));
+    } catch(e) {}
+}
+
+function extractSpreadsheetId(urlOrId) {
+    if (!urlOrId) return '';
+    const str = String(urlOrId).trim();
+    const match = str.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (match) return match[1];
+    if (/^[a-zA-Z0-9-_]{20,}$/.test(str)) return str;
+    return '';
+}
+
+function getSheetUrlForFY(fy) {
+    const urls = getSavedFySheetUrls();
+    if (fy && urls[fy] && urls[fy].trim() !== '') {
+        return urls[fy].trim();
+    }
+    if (fy === '2026-27') return DEFAULT_SHEET_URL_26_27;
+    return DEFAULT_SHEET_URL_25_26;
+}
+
+function getSpreadsheetIdForFY(fy) {
+    const sheetUrl = getSheetUrlForFY(fy);
+    const extracted = extractSpreadsheetId(sheetUrl);
+    if (extracted) return extracted;
+    if (state.spreadsheetIds && state.spreadsheetIds[fy]) {
+        return state.spreadsheetIds[fy];
+    }
+    return fy === '2026-27' ? '1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w' : '1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To';
+}
+
 async function fetchFySettingsFromServer() {
     try {
         const res = await fetch('/api/get-fy-settings');
         const data = await res.json();
-        if (data && data.status === 'Success' && data.urls) {
-            const localUrls = getSavedFyUrls();
-            const serverUrls = data.urls;
-            const merged = { ...localUrls };
-            
-            // Merge server URLs into local state without erasing valid local URLs
-            Object.keys(serverUrls).forEach(fy => {
-                if (serverUrls[fy] && serverUrls[fy].trim() !== '') {
-                    merged[fy] = serverUrls[fy].trim();
-                } else if (!(fy in merged)) {
-                    merged[fy] = '';
-                }
-            });
-            
-            saveFyUrls(merged);
-            populateFYSelector();
-
-            // If client has non-empty URLs that server lacks, sync back to server
-            let shouldSyncServer = false;
-            Object.keys(merged).forEach(fy => {
-                if (merged[fy] && merged[fy].trim() !== '' && (!serverUrls[fy] || serverUrls[fy].trim() === '')) {
-                    shouldSyncServer = true;
-                }
-            });
-            if (shouldSyncServer) {
-                fetch('/api/save-fy-settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ urls: merged })
-                }).catch(() => {});
+        if (data && data.status === 'Success') {
+            if (data.urls) {
+                const localUrls = getSavedFyUrls();
+                const serverUrls = data.urls;
+                const merged = { ...localUrls };
+                Object.keys(serverUrls).forEach(fy => {
+                    if (serverUrls[fy] && serverUrls[fy].trim() !== '') {
+                        merged[fy] = serverUrls[fy].trim();
+                    } else if (!(fy in merged)) {
+                        merged[fy] = '';
+                    }
+                });
+                saveFyUrls(merged);
             }
+            if (data.sheet_urls) {
+                const localSheets = getSavedFySheetUrls();
+                const serverSheets = data.sheet_urls;
+                const mergedSheets = { ...localSheets };
+                Object.keys(serverSheets).forEach(fy => {
+                    if (serverSheets[fy] && serverSheets[fy].trim() !== '') {
+                        mergedSheets[fy] = serverSheets[fy].trim();
+                    } else if (!(fy in mergedSheets)) {
+                        mergedSheets[fy] = '';
+                    }
+                });
+                saveFySheetUrls(mergedSheets);
+            }
+            populateFYSelector();
+            // Refresh dropdown with verified server URLs
+            refreshSheetDropdown();
         }
     } catch(e) {
         console.warn('[FY SETTINGS] Could not load server settings:', e);
@@ -72,9 +131,9 @@ function getWebAppUrlForFY(fy) {
     if (fy && urls[fy] && urls[fy].trim() !== '') {
         return urls[fy].trim();
     }
-    return DEFAULT_WEB_APP_URL;
+    if (fy === '2026-27') return DEFAULT_WEB_APP_URL_26_27;
+    return DEFAULT_WEB_APP_URL_25_26;
 }
-
 
 function getActiveWebAppUrl() {
     return getWebAppUrlForFY(state.currentFY || '2026-27');
@@ -89,6 +148,10 @@ const state = {
     saleOffset: 0, purchaseOffset: 0,
     pageSize: 25,
     saleTotal: 0, purchaseTotal: 0,
+    spreadsheetIds: {
+        '2025-26': '1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To',
+        '2026-27': '1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w'
+    },
 
     // Sheet Viewer
     selectedSheet: '',
@@ -552,6 +615,9 @@ document.addEventListener('click', (e) => {
 function switchFinancialYear(fy) {
     if (!fy || fy === state.currentFY) return;
     state.currentFY = fy;
+    state.selectedSheet = '';
+    const sel = document.getElementById('sheet-select');
+    if (sel) sel.value = '';
     populateFYSelector();
     showToast('🔄', `Switched to FY ${fy}`);
     refreshSheetDropdown();
@@ -574,6 +640,9 @@ async function refreshSheetDropdown() {
             if(sel) sel.innerHTML = '<option value="">-- Choose sheet --</option>';
 
             state.availableSheets = r.sheets || [];
+            if (r.spreadsheetId) {
+                state.spreadsheetIds[state.currentFY] = r.spreadsheetId;
+            }
             r.sheets.forEach(sh => {
                 const txt = `${sh.name} (${sh.rows} rows)`;
                 if(sel) { const o=document.createElement('option'); o.value=sh.name; o.textContent=txt; sel.appendChild(o); }
@@ -595,23 +664,23 @@ async function refreshSheetDropdown() {
                 });
             }
 
-            const def = `AJIO & MYNTRA SALE-PURCHASE ${r.fy}`;
-            const hasDef = r.sheets.some(s=>s.name===def);
+            // Find matching sheet for current FY
+            const matchedFySheet = r.sheets.find(s => s.name.includes(state.currentFY || ''))?.name;
+            const fallbackDef = (r.sheets.length > 0) ? r.sheets[0].name : '';
+            const def = matchedFySheet || fallbackDef;
 
             if(sel) {
                 if(curV && r.sheets.some(s=>s.name===curV)) {
                     setActiveSheetTab(curV);
-                } else if(hasDef) {
+                } else if(def) {
                     setActiveSheetTab(def);
-                } else if(r.sheets.length > 0) {
-                    setActiveSheetTab(r.sheets[0].name);
                 } else {
                     clearViewerTable();
                 }
             }
             if(syncSel) {
                 if(curSV && r.sheets.some(s=>s.name===curSV)) syncSel.value=curSV;
-                else if(hasDef) syncSel.value=def;
+                else if(def) syncSel.value=def;
             }
 
         } else { showToast('⚠️', 'Sheets Error: ' + r.error); }
@@ -840,29 +909,83 @@ function onSheetRowsChange() {
     else if (state.selectedSheet) loadSheetData(3);
 }
 
-// ─── Load Sheet Data ────────────────────────────────────────────────────
+// ─── Load Sheet Data (Fast GViz with Apps Script Fallback) ───────────────────
 async function loadSheetData(startRow) {
     if (!state.selectedSheet) return;
     state.searchToken++;
     state.viewerStartRow = startRow;
     showGlobalLoader('Loading Sheet', `Fetching from ${state.selectedSheet}...`);
 
-    try {
-        const res = await fetch(`${getActiveWebAppUrl()}?action=getSheetData&sheetName=${encodeURIComponent(state.selectedSheet)}&startRow=${startRow}&numRows=${state.viewerPageSize}`);
-        const r = await res.json();
-        hideGlobalLoader();
+    const offset = Math.max(0, (startRow || 3) - 3);
+    const limit = state.viewerPageSize || 25;
+    const spreadsheetId = getSpreadsheetIdForFY(state.currentFY);
 
-        if (r.success) {
-            state.viewerHeaders = r.headers||[];
-            state.viewerRows = r.data||[];
-            state.viewerAllRows = r.data||[];
-            state.viewerTotalRows = r.totalRows||0;
-            renderViewerTable();
-        } else {
-            showToast('❌', 'Data Error: '+r.error);
+    let gvizSuccess = false;
+    if (spreadsheetId) {
+        try {
+            const gvizQuery = encodeURIComponent(`limit ${limit} offset ${offset}`);
+            const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(state.selectedSheet)}&tq=${gvizQuery}`;
+            const ctrl = new AbortController();
+            const timeoutId = setTimeout(() => ctrl.abort(), 8000);
+            const res = await fetch(gvizUrl, { signal: ctrl.signal });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+                const text = await res.text();
+                const jsonStart = text.indexOf('{');
+                const jsonEnd = text.lastIndexOf('}');
+                if (jsonStart !== -1 && jsonEnd !== -1) {
+                    const parsed = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+                    if (parsed.status === 'ok' && parsed.table) {
+                        const table = parsed.table;
+                        const headers = (table.cols || []).map(c => c.label || c.id || '');
+                        const rows = (table.rows || []).map(r => {
+                            return (r.c || []).map(cell => {
+                                if (!cell) return '';
+                                return cell.f !== undefined ? cell.f : (cell.v !== null ? cell.v : '');
+                            });
+                        });
+
+                        const curSheetObj = state.availableSheets.find(s => s.name === state.selectedSheet);
+                        const totalRows = curSheetObj ? Math.max(0, curSheetObj.rows - 2) : (rows.length + offset);
+
+                        hideGlobalLoader();
+                        state.viewerHeaders = [headers];
+                        state.viewerRows = rows;
+                        state.viewerAllRows = rows;
+                        state.viewerTotalRows = totalRows;
+                        renderViewerTable();
+                        gvizSuccess = true;
+                    }
+                }
+            }
+        } catch(gvizErr) {
+            console.warn('[GViz Fast Load failed, falling back to Apps Script]', gvizErr);
+        }
+    }
+
+    if (!gvizSuccess) {
+        try {
+            const res = await fetch(`${getActiveWebAppUrl()}?action=getSheetData&sheetName=${encodeURIComponent(state.selectedSheet)}&startRow=${startRow}&numRows=${state.viewerPageSize}`);
+            const r = await res.json();
+            hideGlobalLoader();
+
+            if (r.success) {
+                state.viewerHeaders = r.headers||[];
+                state.viewerRows = r.data||[];
+                state.viewerAllRows = r.data||[];
+                state.viewerTotalRows = r.totalRows||0;
+                renderViewerTable();
+            } else {
+                showToast('❌', 'Data Error: '+r.error);
+                clearViewerTable();
+            }
+        } catch(e) {
+            hideGlobalLoader();
+            showToast('❌', 'Network error');
             clearViewerTable();
         }
-    } catch(e) { hideGlobalLoader(); showToast('❌', 'Network error'); clearViewerTable(); }
+    }
 }
 
 // ─── Render Viewer Table ────────────────────────────────────────────────
@@ -1134,13 +1257,17 @@ async function startSyncToGoogleSheets() {
                 totalBatches: totalBatches
             };
             
-            // Call Google Apps Script directly
-            const response = await fetch(activeUrl, {
+            // Call Google Apps Script via local backend proxy to bypass browser CORS / redirect errors
+            const response = await fetch('/api/send-sync-chunk', {
                 method: 'POST',
-                body: JSON.stringify(payload)
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    webAppUrl: activeUrl,
+                    payload: payload
+                })
             });
             const resJSON = await response.json();
-            if (!resJSON.success) throw new Error(resJSON.error || `Batch ${i} failed`);
+            if (!response.ok || !resJSON.success) throw new Error(resJSON.error || `Batch ${i} failed`);
         }
         
         // Done! Hide loader and show success modal
@@ -1206,9 +1333,19 @@ function showToast(icon, msg) {
     window._tt = setTimeout(() => t.classList.add('hidden'), 5000);
 }
 
-function showErrorModal(msg) {
+function showErrorModal(msg, title) {
     const overlay = document.getElementById('error-modal-overlay');
     const msgEl = document.getElementById('error-modal-message');
+    const titleEl = document.getElementById('error-modal-title');
+    if (titleEl) {
+        if (title) {
+            titleEl.textContent = title;
+        } else if (msg && (msg.toLowerCase().includes('sheet') || msg.toLowerCase().includes('data error'))) {
+            titleEl.textContent = 'Google Sheets Error';
+        } else {
+            titleEl.textContent = 'Notice / Error';
+        }
+    }
     if (overlay && msgEl) {
         msgEl.textContent = msg;
         overlay.classList.remove('hidden');
@@ -1284,14 +1421,14 @@ function showActualSettingsModal() {
     if (container) {
         container.innerHTML = '';
         const urls = getSavedFyUrls();
-        const keys = Object.keys(urls);
-        if (keys.length === 0) {
-            urls['2025-26'] = DEFAULT_WEB_APP_URL;
-            urls['2026-27'] = '';
+        const sheetUrls = getSavedFySheetUrls();
+        const allKeys = Array.from(new Set([...Object.keys(urls), ...Object.keys(sheetUrls)])).sort();
+        if (allKeys.length === 0) {
+            allKeys.push('2025-26', '2026-27');
         }
 
-        Object.entries(urls).forEach(([fy, url]) => {
-            addFYSettingRowElement(fy, url);
+        allKeys.forEach(fy => {
+            addFYSettingRowElement(fy, urls[fy] || '', sheetUrls[fy] || '');
         });
     }
 
@@ -1307,53 +1444,69 @@ function closeSettingsModal() {
     }
 }
 
-function addFYSettingRowElement(fy = '', url = '') {
+function addFYSettingRowElement(fy = '', webAppUrl = '', sheetUrl = '') {
     const container = document.getElementById('fy-url-settings-list');
     if (!container) return;
 
     const div = document.createElement('div');
     div.className = 'fy-setting-item';
-    div.style.cssText = 'display:flex; gap:10px; align-items:center; background:var(--bg-secondary); padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border-glass);';
+    div.style.cssText = 'background:var(--bg-secondary); padding:14px; border-radius:var(--radius-md); border:1px solid var(--border-glass); display:flex; flex-direction:column; gap:10px;';
     div.innerHTML = `
-        <div style="width:110px;">
-            <label style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Financial Year</label>
-            <input type="text" class="fy-key-input compact-select" value="${esc(fy)}" placeholder="2026-27" style="width:100%; font-weight:bold;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <label style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Financial Year:</label>
+                <input type="text" class="fy-key-input compact-select" value="${esc(fy)}" placeholder="2026-27" style="font-weight:bold; width:110px; padding:4px 8px;">
+            </div>
+            <button type="button" class="btn btn-danger-outline btn-sm" onclick="this.closest('.fy-setting-item').remove()" style="padding:3px 8px; font-size:0.75rem;" title="Remove this FY">🗑️ Remove</button>
         </div>
-        <div style="flex:1;">
-            <label style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Google Web App URL</label>
-            <input type="text" class="fy-url-input search-input" value="${esc(url)}" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%; font-size:0.8rem; padding:6px 10px;">
+        <div style="display:flex; flex-direction:column; gap:8px;">
+            <div>
+                <label style="font-size:0.72rem; color:var(--text-secondary); font-weight:600; display:flex; justify-content:space-between; margin-bottom:3px;">
+                    <span>📤 Google Web App URL <span style="font-weight:normal; color:var(--text-muted);">(Used for Data Adding / Syncing)</span></span>
+                </label>
+                <input type="text" class="fy-url-input search-input" value="${esc(webAppUrl)}" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%; font-size:0.8rem; padding:6px 10px;">
+            </div>
+            <div>
+                <label style="font-size:0.72rem; color:var(--accent-purchase); font-weight:600; display:flex; justify-content:space-between; margin-bottom:3px;">
+                    <span>⚡ Google Sheet Direct Link <span style="font-weight:normal; color:var(--text-muted);">(Superfast Viewer — Anyone with link: Viewer)</span></span>
+                </label>
+                <input type="text" class="fy-sheet-url-input search-input" value="${esc(sheetUrl)}" placeholder="https://docs.google.com/spreadsheets/d/.../edit" style="width:100%; font-size:0.8rem; padding:6px 10px; border-color:rgba(16, 185, 129, 0.4);">
+            </div>
         </div>
-        <button type="button" class="btn btn-danger-outline btn-sm" onclick="this.parentElement.remove()" style="margin-top:16px; padding:4px 8px;" title="Remove">🗑️</button>
     `;
     container.appendChild(div);
 }
 
 function addNewFYSettingRow() {
-    addFYSettingRowElement('', '');
+    addFYSettingRowElement('', '', '');
 }
 
 async function saveSettings() {
     const items = document.querySelectorAll('.fy-setting-item');
     const urls = {};
+    const sheetUrls = {};
     items.forEach(item => {
         const fy = item.querySelector('.fy-key-input')?.value?.trim();
         const url = item.querySelector('.fy-url-input')?.value?.trim();
+        const sheetUrl = item.querySelector('.fy-sheet-url-input')?.value?.trim();
         if (fy) {
             urls[fy] = url || '';
+            sheetUrls[fy] = sheetUrl || '';
         }
     });
     saveFyUrls(urls);
+    saveFySheetUrls(sheetUrls);
     try {
         await fetch('/api/save-fy-settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ urls })
+            body: JSON.stringify({ urls, sheet_urls: sheetUrls })
         });
     } catch(e) {
         console.error('[FY SETTINGS] Failed to sync settings to server:', e);
     }
     closeSettingsModal();
-    showToast('✅', 'Multi-Year Settings Saved & Synced!');
+    showToast('✅', 'Settings Saved! Fast Viewer is active.');
     populateFYSelector();
     refreshSheetDropdown();
     refreshSyncDropdown();

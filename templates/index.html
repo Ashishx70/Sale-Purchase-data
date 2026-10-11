@@ -411,15 +411,15 @@
 
     <!-- Multi-Year Settings Modal -->
     <div id="settings-modal-overlay" class="modal-overlay hidden">
-        <div class="modal-card" style="width:540px; max-width:94vw;">
+        <div class="modal-card" style="width:660px; max-width:95vw;">
             <h3 style="color:var(--text-primary); display:flex; align-items:center; gap:8px;">
                 ⚙️ Google Sheets Multi-Year Settings
             </h3>
-            <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
-                Configure Web App URLs for each Financial Year. Data will automatically route to the matching Sheet file!
+            <p style="font-size:0.83rem; color:var(--text-secondary); margin-bottom:14px; line-height:1.4;">
+                Configure <strong>Google Web App URL</strong> (for adding/syncing data) and <strong>Google Sheet Link</strong> (for superfast viewing) for each Financial Year.
             </p>
 
-            <div id="fy-url-settings-list" style="display:flex; flex-direction:column; gap:12px; max-height:300px; overflow-y:auto; padding-right:4px; margin-bottom:16px;">
+            <div id="fy-url-settings-list" style="display:flex; flex-direction:column; gap:14px; max-height:360px; overflow-y:auto; padding-right:4px; margin-bottom:16px;">
                 <!-- FY rows dynamically loaded here -->
             </div>
 
@@ -438,7 +438,7 @@
     <div id="error-modal-overlay" class="modal-overlay hidden">
         <div class="modal-card" style="width: 460px; text-align: center; border-top: 5px solid var(--accent-danger, #ef4444); border-radius: var(--radius-lg); padding: 28px; box-shadow: var(--shadow-lg);">
             <div style="font-size: 3.5rem; margin-bottom: 12px; color: var(--accent-danger, #ef4444);">⚠️</div>
-            <h3 style="margin-bottom: 8px; color: var(--text-primary); font-size: 1.25rem; font-weight: 700;">Upload / Processing Error</h3>
+            <h3 id="error-modal-title" style="margin-bottom: 8px; color: var(--text-primary); font-size: 1.25rem; font-weight: 700;">Notice / Error</h3>
             <p id="error-modal-message" style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 24px; text-align: left; background: var(--bg-secondary, #f8fafc); padding: 12px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-glass, #e2e8f0); white-space: pre-line; word-break: break-word;"></p>
             <div class="modal-actions" style="justify-content: center; width: 100%;">
                 <button type="button" class="btn btn-primary" onclick="closeErrorModal()" style="width: 100%; justify-content: center; background-color: var(--accent-danger, #ef4444); color: #fff; border: none; font-weight: 600; padding: 10px 0; border-radius: var(--radius-sm); cursor: pointer;">Close</button>

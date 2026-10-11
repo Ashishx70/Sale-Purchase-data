@@ -1629,29 +1629,57 @@ DEFAULT_FY_URLS = {
     '2026-27': 'https://script.google.com/macros/s/AKfycbyWMb69Xfk-Gkkp5Ye5mYCE8DoFUG0ua804LBlLErACpGPBAh1yZc3UhaIcRWvaiMGA/exec'
 }
 
-def load_fy_settings():
+DEFAULT_SHEET_URLS = {
+    '2025-26': 'https://docs.google.com/spreadsheets/d/1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To/edit',
+    '2026-27': 'https://docs.google.com/spreadsheets/d/1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w/edit'
+}
+
+def load_fy_all_settings():
+    urls = dict(DEFAULT_FY_URLS)
+    sheet_urls = dict(DEFAULT_SHEET_URLS)
     if os.path.exists(FY_SETTINGS_FILE):
         try:
             with open(FY_SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    return data
+                    if 'urls' in data and isinstance(data['urls'], dict):
+                        urls.update(data['urls'])
+                        if 'sheet_urls' in data and isinstance(data['sheet_urls'], dict):
+                            sheet_urls.update(data['sheet_urls'])
+                    else:
+                        for k, v in data.items():
+                            if isinstance(v, str):
+                                urls[k] = v
         except Exception as err:
             print(f"[FY SETTINGS] Error reading fy_settings.json: {str(err)}", flush=True)
-    return dict(DEFAULT_FY_URLS)
+    return urls, sheet_urls
 
-def save_fy_settings_file(data):
+def load_fy_settings():
+    urls, _ = load_fy_all_settings()
+    return urls
+
+def save_fy_settings_file(urls, sheet_urls=None):
     try:
-        existing = load_fy_settings()
-        if isinstance(data, dict):
-            for k, v in data.items():
+        cur_urls, cur_sheet_urls = load_fy_all_settings()
+        if isinstance(urls, dict):
+            for k, v in urls.items():
                 if v and str(v).strip():
-                    existing[k] = str(v).strip()
-                elif k not in existing:
-                    existing[k] = ''
+                    cur_urls[k] = str(v).strip()
+                elif k not in cur_urls:
+                    cur_urls[k] = ''
+        if isinstance(sheet_urls, dict):
+            for k, v in sheet_urls.items():
+                if v and str(v).strip():
+                    cur_sheet_urls[k] = str(v).strip()
+                elif k not in cur_sheet_urls:
+                    cur_sheet_urls[k] = ''
+        full_data = {
+            'urls': cur_urls,
+            'sheet_urls': cur_sheet_urls
+        }
         with open(FY_SETTINGS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, indent=2, ensure_ascii=False)
-        print(f"[FY SETTINGS] Saved multi-year settings to fy_settings.json: {existing}", flush=True)
+            json.dump(full_data, f, indent=2, ensure_ascii=False)
+        print(f"[FY SETTINGS] Saved multi-year settings to fy_settings.json: {full_data}", flush=True)
 
     except Exception as err:
         print(f"[FY SETTINGS ERROR] Failed to save fy_settings.json: {str(err)}", flush=True)
@@ -1665,8 +1693,8 @@ def get_fy_settings():
         response.headers.add("Access-Control-Allow-Headers", "Content-Type")
         response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
         return response
-    urls = load_fy_settings()
-    response = jsonify({"status": "Success", "urls": urls})
+    urls, sheet_urls = load_fy_all_settings()
+    response = jsonify({"status": "Success", "urls": urls, "sheet_urls": sheet_urls})
     response.headers.add("Access-Control-Allow-Origin", "*")
     return response
 
@@ -1681,10 +1709,11 @@ def save_fy_settings():
     try:
         data = request.get_json(force=True, silent=True) or {}
         urls = data.get('urls', {})
-        if isinstance(urls, dict):
-            save_fy_settings_file(urls)
+        sheet_urls = data.get('sheet_urls', {})
+        if isinstance(urls, dict) or isinstance(sheet_urls, dict):
+            save_fy_settings_file(urls, sheet_urls)
             threading.Thread(target=_load_cache_safely, daemon=True).start()
-            response = jsonify({"status": "Success", "message": "Multi-Year FY settings saved successfully", "urls": urls})
+            response = jsonify({"status": "Success", "message": "Multi-Year FY settings saved successfully", "urls": urls, "sheet_urls": sheet_urls})
             response.headers.add("Access-Control-Allow-Origin", "*")
             return response
         else:
@@ -4059,6 +4088,28 @@ def get_sync_chunk():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/send-sync-chunk', methods=['POST'])
+def send_sync_chunk():
+    """Proxy endpoint to send a batch chunk to Google Apps Script safely without browser CORS issues."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        web_app_url = data.get('webAppUrl')
+        payload = data.get('payload')
+        
+        if not web_app_url or not payload:
+            return jsonify({'success': False, 'error': 'Missing webAppUrl or payload'}), 400
+            
+        response = requests.post(web_app_url, json=payload, timeout=180)
+        if response.status_code != 200:
+            return jsonify({'success': False, 'error': f'Google Apps Script returned status {response.status_code}'}), 500
+            
+        result = response.json()
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/get-sync-data', methods=['POST'])
