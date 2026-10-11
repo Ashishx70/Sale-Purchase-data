@@ -4117,11 +4117,12 @@ def send_sync_chunk():
         b_tot = payload.get('totalBatches', '?')
         s_cnt = len(payload.get('saleRows', []))
         p_cnt = len(payload.get('purchaseRows', []))
-        # Continuous printing: only 'data database me update ho raha he'
+        # Continuous printing in English with live timestamp
         stop_ticker = threading.Event()
         def live_heartbeat():
             while not stop_ticker.wait(2.0):
-                print("data database me update ho raha he", flush=True)
+                now_str = datetime.now().strftime("%I:%M:%S %p")
+                print(f"[{now_str}] Updating data to database...", flush=True)
                 
         ticker_thread = threading.Thread(target=live_heartbeat, daemon=True)
         ticker_thread.start()
@@ -4141,7 +4142,8 @@ def send_sync_chunk():
             return jsonify({'success': False, 'error': f'Google Apps Script returned invalid response (HTML/Text): {response.text[:150]}'}), 500
 
         if result.get('success'):
-            print("data database me update ho raha he", flush=True)
+            now_str = datetime.now().strftime("%I:%M:%S %p")
+            print(f"[{now_str}] Updating data to database...", flush=True)
         return jsonify(result)
     except Exception as e:
         print(f"[SYNC CHUNK EXCEPTION] ❌ {str(e)}", flush=True)

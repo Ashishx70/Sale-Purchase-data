@@ -1277,7 +1277,8 @@ async function startSyncToGoogleSheets() {
             console.log(`[SYNC] Uploading batch ${i}/${totalBatches} (Sales: ${saleChunk.length}, Purchases: ${purchaseChunk.length})...`);
             
             const liveTimer = setInterval(() => {
-                showGlobalLoader('Syncing Data', 'data database me update ho raha he');
+                const now = new Date().toLocaleTimeString();
+                showGlobalLoader('Syncing Data', `[${now}] Updating data to database...`);
             }, 1000);
             
             let okSend = false, resJSON = null;
@@ -1300,8 +1301,9 @@ async function startSyncToGoogleSheets() {
                 console.error(`[SYNC ERROR] Batch ${i}/${totalBatches} failed:`, resJSON);
                 throw new Error(resJSON.error || `Batch ${i} failed`);
             }
-            console.log('data database me update ho raha he');
-            showGlobalLoader('Syncing Data', 'data database me update ho raha he');
+            const nowTime = new Date().toLocaleTimeString();
+            console.log(`[${nowTime}] Updating data to database...`);
+            showGlobalLoader('Syncing Data', `[${nowTime}] Updating data to database...`);
         }
         
         // Done! Hide loader and show success modal
