@@ -20,7 +20,7 @@ SCOPES = [
 _cached_service = None
 _cached_key_info = None
 
-# Supabase cloud credentials
+# Supabase cloud credentials for cache sync
 _ENC_KEY = "c2Jfc2VjcmV0X05LRUt1SEtrRnRBQnlHZWJRTmFvUUFfVE5waklMNGg="
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://zjxaottgkumhydhsylor.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", base64.b64decode(_ENC_KEY).decode('utf-8'))
@@ -42,44 +42,29 @@ def get_service_account_path():
     return matches[0] if matches else None
 
 def get_service_account_info_cached():
-    """Get service account info dict from local file, env var, or Supabase cloud."""
+    """Get service account info dict securely from Render Environment Variables or local disk file."""
     global _cached_key_info
     if _cached_key_info is not None:
         return _cached_key_info
 
-    # 1. Environment variable
+    # 1. Render Encrypted Environment Variable (Best Security Standard)
     env_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
     if env_json and env_json.strip():
         try:
             _cached_key_info = json.loads(env_json.strip())
             return _cached_key_info
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[DIRECT SYNC] Error parsing GOOGLE_SERVICE_ACCOUNT_JSON from env: {e}", flush=True)
 
-    # 2. Local disk file
+    # 2. Local disk file (for local machine development)
     p = get_service_account_path()
     if p and os.path.exists(p):
         try:
             with open(p, 'r', encoding='utf-8') as f:
                 _cached_key_info = json.load(f)
                 return _cached_key_info
-        except Exception:
-            pass
-
-    # 3. Supabase Cloud store (works automatically on Render without any dashboard setup!)
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/sale_cache?key=eq.__SYS_GSA__&select=seller_name",
-            headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'},
-            timeout=5
-        )
-        if r.status_code == 200 and r.json():
-            raw_str = r.json()[0].get('seller_name')
-            if raw_str:
-                _cached_key_info = json.loads(raw_str)
-                return _cached_key_info
-    except Exception as sb_err:
-        print(f"[DIRECT SYNC] Supabase cloud key fetch notice: {sb_err}", flush=True)
+        except Exception as e:
+            print(f"[DIRECT SYNC] Error loading credentials from {p}: {e}", flush=True)
 
     return None
 
@@ -95,7 +80,7 @@ def get_sheets_service():
         return _cached_service
     info = get_service_account_info_cached()
     if not info:
-        raise ValueError("Service account JSON key not found in environment, workspace, or Supabase cloud.")
+        raise ValueError("Service account JSON key not found in environment or workspace.")
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     _cached_service = build('sheets', 'v4', credentials=creds, cache_discovery=False)
     return _cached_service
