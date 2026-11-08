@@ -18,15 +18,49 @@ SCOPES = [
 _cached_service = None
 
 def get_service_account_path():
-    """Return path to service account JSON key if present."""
+    """Return path to service account JSON key if present on disk."""
+    # 1. Standard workspace path
     if os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
         return SERVICE_ACCOUNT_KEY_PATH
+    # 2. Render secret files path (/etc/secrets/...)
+    render_secrets = [
+        '/etc/secrets/flipkart-gmail-otp-reader-d7c1a22b35c6.json',
+        '/etc/secrets/google_service_account.json',
+        '/etc/secrets/credentials.json'
+    ]
+    for sp in render_secrets:
+        if os.path.exists(sp):
+            return sp
+    # 3. Match any key in WORKSPACE
     import glob
     matches = glob.glob(os.path.join(WORKSPACE, '*gmail-otp-reader*.json')) + glob.glob(os.path.join(WORKSPACE, '*service_account*.json'))
     return matches[0] if matches else None
 
+def get_service_account_credentials():
+    """Return Google Credentials object from environment variable or local file."""
+    # 1. Check Render / Cloud environment variable (GOOGLE_SERVICE_ACCOUNT_JSON)
+    env_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
+    if env_json and env_json.strip():
+        try:
+            info = json.loads(env_json.strip())
+            return Credentials.from_service_account_info(info, scopes=SCOPES)
+        except Exception as e:
+            print(f"[DIRECT SYNC] Error parsing GOOGLE_SERVICE_ACCOUNT_JSON env: {e}", flush=True)
+
+    # 2. Check local file or Render secret file
+    p = get_service_account_path()
+    if p and os.path.exists(p):
+        try:
+            return Credentials.from_service_account_file(p, scopes=SCOPES)
+        except Exception as e:
+            print(f"[DIRECT SYNC] Error loading credentials from {p}: {e}", flush=True)
+            
+    return None
+
 def is_direct_sync_available():
     """Check if direct Google Sheets API sync is available."""
+    if os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '').strip():
+        return True
     p = get_service_account_path()
     return bool(p and os.path.exists(p))
 
@@ -35,10 +69,9 @@ def get_sheets_service():
     global _cached_service
     if _cached_service is not None:
         return _cached_service
-    key_path = get_service_account_path()
-    if not key_path:
-        raise ValueError("Service account JSON key not found in project workspace.")
-    creds = Credentials.from_service_account_file(key_path, scopes=SCOPES)
+    creds = get_service_account_credentials()
+    if not creds:
+        raise ValueError("Service account JSON key not found in environment or workspace.")
     _cached_service = build('sheets', 'v4', credentials=creds, cache_discovery=False)
     return _cached_service
 
