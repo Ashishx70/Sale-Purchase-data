@@ -32,8 +32,11 @@
             <button class="btn btn-sm" onclick="openSettingsModal()" style="display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg,#6366f1,#818cf8); color:#ffffff; font-weight:600; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; margin-left:16px; box-shadow:0 2px 8px rgba(99,102,241,0.25);">
                 ⚙️ Sheet Settings
             </button>
-            <button class="btn btn-sm" onclick="openSupabaseModal()" style="display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg,#059669,#10b981); color:#ffffff; font-weight:600; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; margin-left:8px; box-shadow:0 2px 8px rgba(16,185,129,0.25);">
-                ⚡ Supabase Cache (Live / Nill)
+            <button class="btn btn-sm" onclick="openSupabaseModal()" style="display:inline-flex; align-items:center; gap:6px; background:rgba(16, 185, 129, 0.12); color:#047857; font-weight:700; border:1px solid rgba(16, 185, 129, 0.35); padding:6px 14px; border-radius:8px; cursor:pointer; margin-left:8px; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); box-shadow:0 2px 8px rgba(16,185,129,0.12); transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1);">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+                <span>Supabase Cache (Live / Nill)</span>
             </button>
         </div>
 
@@ -449,67 +452,118 @@
         </div>
     </div>
 
+    <!-- Custom Glassmorphism Confirmation/Alert Modal -->
+    <div id="sp-custom-modal-overlay" class="modal-overlay hidden" style="z-index: 999999; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: rgba(15, 23, 42, 0.65);">
+        <div class="modal-card" style="width: 440px; border-radius: 20px; padding: 26px; background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; border-bottom: 1px solid rgba(226, 232, 240, 0.8); padding-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div id="sp-modal-icon-badge" style="width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                        <!-- SVG injected dynamically -->
+                    </div>
+                    <h3 id="sp-modal-title" style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #0f172a;">Notice</h3>
+                </div>
+                <button onclick="closeSpCustomModal(false)" style="background: rgba(148, 163, 184, 0.1); border: 1px solid rgba(148, 163, 184, 0.2); width: 28px; height: 28px; border-radius: 6px; font-size: 18px; color: #64748b; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.color='#ef4444';" onmouseout="this.style.color='#64748b';">&times;</button>
+            </div>
+            <div id="sp-modal-message" style="font-size: 0.88rem; color: #334155; line-height: 1.6; margin-bottom: 20px;"></div>
+            <div id="sp-modal-buttons" style="display: flex; gap: 10px; justify-content: flex-end;">
+                <!-- Buttons injected dynamically -->
+            </div>
+        </div>
+    </div>
+
     <!-- Supabase Working Cache Manager Modal -->
-    <div id="supabase-modal-overlay" class="modal-overlay hidden">
-        <div class="modal-card" style="width: 520px; border-radius: var(--radius-lg); padding: 26px; box-shadow: var(--shadow-lg); background: #ffffff;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid var(--border-glass, #e2e8f0); padding-bottom: 12px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.4rem;">⚡</span>
+    <div id="supabase-modal-overlay" class="modal-overlay hidden" style="backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: rgba(15, 23, 42, 0.65); z-index: 99999;">
+        <div class="modal-card" style="width: 540px; border-radius: 20px; padding: 26px; box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25); background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid rgba(255, 255, 255, 0.7);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 1px solid rgba(226, 232, 240, 0.8); padding-bottom: 14px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.28); display: flex; align-items: center; justify-content: center; color: #059669; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.15);">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                        </svg>
+                    </div>
                     <div>
-                        <h3 style="margin: 0; color: var(--text-primary); font-size: 1.15rem; font-weight: 700;">Supabase Cache Manager</h3>
-                        <p style="margin: 2px 0 0; font-size: 0.78rem; color: var(--text-secondary);">5-Hour On-Demand Working Session Cache</p>
+                        <h3 style="margin: 0; color: #0f172a; font-size: 1.2rem; font-weight: 800;">Supabase Cache Manager</h3>
+                        <p style="margin: 2px 0 0; font-size: 0.8rem; color: #64748b;">5-Hour On-Demand Working Session Cache</p>
                     </div>
                 </div>
-                <button onclick="closeSupabaseModal()" style="background:none; border:none; font-size:1.4rem; cursor:pointer; color:var(--text-muted);">&times;</button>
+                <button onclick="closeSupabaseModal()" style="background: rgba(148, 163, 184, 0.1); border: 1px solid rgba(148, 163, 184, 0.2); width: 30px; height: 30px; border-radius: 8px; font-size: 20px; cursor: pointer; color: #64748b; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.color='#ef4444';" onmouseout="this.style.color='#64748b';">&times;</button>
             </div>
 
             <!-- Live Status Banner -->
-            <div id="sb-status-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 16px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="font-size: 0.8rem; font-weight: 700; color: #475569; text-transform: uppercase;">Cache Status</span>
-                    <span id="sb-status-badge" style="font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: #fee2e2; color: #dc2626;">Checking...</span>
+            <div id="sb-status-box" style="background: rgba(248, 250, 252, 0.75); border: 1px solid rgba(226, 232, 240, 0.8); border-radius: 14px; padding: 16px; margin-bottom: 16px; backdrop-filter: blur(8px);">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                    <span style="font-size: 0.78rem; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">Cache Status</span>
+                    <span id="sb-status-badge" style="font-size: 0.75rem; font-weight: 700; padding: 2px 10px; border-radius: 20px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #dc2626;">Checking...</span>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem;">
-                    <div>Sale Keys: <strong id="sb-sale-count">0</strong></div>
-                    <div>Purchase Keys: <strong id="sb-purchase-count">0</strong></div>
-                    <div style="grid-column: span 2;">Active Sheets: <strong id="sb-active-sheets">None (Nill)</strong></div>
-                    <div style="grid-column: span 2; color: #6366f1;">⏱️ Session Remaining: <strong id="sb-timer-left">--</strong></div>
+                    <div style="background: rgba(255,255,255,0.8); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px;">
+                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">Sale Keys:</span>
+                        <div style="font-size: 1.15rem; font-weight: 800; color: #0f172a; margin-top: 2px;"><strong id="sb-sale-count">0</strong></div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.8); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px;">
+                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">Purchase Keys:</span>
+                        <div style="font-size: 1.15rem; font-weight: 800; color: #0f172a; margin-top: 2px;"><strong id="sb-purchase-count">0</strong></div>
+                    </div>
+                    <div style="grid-column: span 2; background: rgba(255,255,255,0.8); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px;">
+                        <div style="font-size: 0.75rem; color: #64748b; font-weight: 600;">Active Sheets:</div>
+                        <div style="font-weight: 700; color: #10b981; margin-top: 2px;"><strong id="sb-active-sheets">None (Nill)</strong></div>
+                    </div>
+                    <div style="grid-column: span 2; background: rgba(255,255,255,0.8); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px; display: flex; align-items: center; gap: 6px; color: #6366f1;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        <span style="font-size: 0.78rem; font-weight: 600;">Session Remaining:</span>
+                        <strong id="sb-timer-left">--</strong>
+                    </div>
                 </div>
             </div>
 
             <!-- Sheet Selection -->
             <div style="margin-bottom: 16px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <label style="font-size: 0.82rem; font-weight: 700; color: #334155;">
+                    <label style="font-size: 0.82rem; font-weight: 800; color: #334155;">
                         Select Sheets To Send Into Database:
                     </label>
-                    <button type="button" onclick="selectAllSBSheets(true)" style="background:none; border:none; font-size:0.75rem; color:#2563eb; cursor:pointer; font-weight:600;">Select All</button>
+                    <button type="button" onclick="selectAllSBSheets(true)" style="background:none; border:none; font-size:0.75rem; color:#2563eb; cursor:pointer; font-weight:700;">Select All</button>
                 </div>
-                <div id="sb-sheets-checklist" style="max-height: 160px; overflow-y: auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div id="sb-sheets-checklist" style="max-height: 160px; overflow-y: auto; background: rgba(255,255,255,0.8); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
                     <span style="font-size: 0.82rem; color: #94a3b8;">Loading available sheets...</span>
                 </div>
             </div>
 
             <!-- Progress Bar -->
-            <div id="sb-progress-wrap" style="display: none; margin-bottom: 16px;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.78rem; font-weight: 600; margin-bottom: 4px; color: #059669;">
+            <div id="sb-progress-wrap" style="display: none; margin-bottom: 16px; background: rgba(240, 253, 244, 0.8); border: 1px solid rgba(187, 247, 208, 0.8); border-radius: 10px; padding: 10px; backdrop-filter: blur(8px);">
+                <div style="display: flex; justify-content: space-between; font-size: 0.78rem; font-weight: 700; margin-bottom: 6px; color: #059669;">
                     <span id="sb-progress-msg">Syncing...</span>
                     <span id="sb-progress-pct">0%</span>
                 </div>
-                <div style="height: 6px; background: #e2e8f0; border-radius: 6px; overflow: hidden;">
+                <div style="height: 6px; background: rgba(220, 252, 231, 0.8); border-radius: 6px; overflow: hidden;">
                     <div id="sb-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #10b981, #059669); transition: width 0.3s;"></div>
                 </div>
             </div>
 
             <!-- Action Buttons -->
-            <div style="display: flex; gap: 10px; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 16px;">
-                <button type="button" class="btn btn-sm" onclick="nillSupabaseCache()" style="background: #ef4444; color: #fff; border: none; padding: 9px 14px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-                    🗑️ Nill Database (0 Rows)
+            <div style="display: flex; gap: 10px; justify-content: space-between; align-items: center; border-top: 1px solid rgba(226, 232, 240, 0.8); padding-top: 16px;">
+                <button type="button" onclick="nillSupabaseCache()" style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.28); color: #dc2626; padding: 10px 14px; font-weight: 700; font-size: 0.85rem; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 6px; backdrop-filter: blur(8px); transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);" onmouseover="this.style.background='rgba(239, 68, 68, 0.16)';" onmouseout="this.style.background='rgba(239, 68, 68, 0.08)';">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                    <span>Nill Database (0 Rows)</span>
                 </button>
                 <div style="display: flex; gap: 8px;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeSupabaseModal()">Close</button>
-                    <button type="button" id="sb-sync-btn" class="btn btn-primary btn-sm" onclick="startSupabaseSync()" style="background: #10b981; border: none; font-weight: 700; padding: 9px 16px; border-radius: 6px; color:#fff; cursor:pointer;">
-                        🚀 Send Selected Sheets
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeSupabaseModal()" style="border-radius: 10px; padding: 9px 16px; font-weight: 600;">Close</button>
+                    <button type="button" id="sb-sync-btn" onclick="startSupabaseSync()" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #047857; font-weight: 700; font-size: 0.85rem; padding: 10px 18px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 6px; backdrop-filter: blur(8px); transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);" onmouseover="this.style.background='rgba(16, 185, 129, 0.22)';" onmouseout="this.style.background='rgba(16, 185, 129, 0.12)';">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                        <span>Send Selected Sheets</span>
                     </button>
                 </div>
             </div>
@@ -517,6 +571,62 @@
     </div>
 
     <script>
+        function showSpCustomModal({ title = 'Notice', message = '', type = 'info', confirmText = 'OK', cancelText = null }) {
+            return new Promise((resolve) => {
+                const overlay = document.getElementById('sp-custom-modal-overlay');
+                const iconBadge = document.getElementById('sp-modal-icon-badge');
+                const titleEl = document.getElementById('sp-modal-title');
+                const msgEl = document.getElementById('sp-modal-message');
+                const btnsEl = document.getElementById('sp-modal-buttons');
+
+                titleEl.textContent = title;
+                msgEl.innerHTML = message;
+                btnsEl.innerHTML = '';
+
+                const isDanger = type === 'danger';
+                const isSuccess = type === 'success';
+
+                iconBadge.style.background = isDanger ? 'rgba(239, 68, 68, 0.1)' : isSuccess ? 'rgba(16, 185, 129, 0.1)' : 'rgba(99, 102, 241, 0.1)';
+                iconBadge.style.border = isDanger ? '1px solid rgba(239, 68, 68, 0.25)' : isSuccess ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(99, 102, 241, 0.25)';
+                iconBadge.style.color = isDanger ? '#dc2626' : isSuccess ? '#059669' : '#6366f1';
+
+                if (isDanger) {
+                    iconBadge.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+                } else if (isSuccess) {
+                    iconBadge.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`;
+                } else {
+                    iconBadge.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
+                }
+
+                if (cancelText) {
+                    const cancelBtn = document.createElement('button');
+                    cancelBtn.type = 'button';
+                    cancelBtn.style.cssText = 'background: rgba(241, 245, 249, 0.85); border: 1px solid rgba(203, 213, 225, 0.8); color: #475569; padding: 9px 16px; border-radius: 10px; font-weight: 700; font-size: 0.85rem; cursor: pointer; backdrop-filter: blur(8px);';
+                    cancelBtn.textContent = cancelText;
+                    cancelBtn.onclick = () => { overlay.classList.add('hidden'); resolve(false); };
+                    btnsEl.appendChild(cancelBtn);
+                }
+
+                const confirmBtn = document.createElement('button');
+                confirmBtn.type = 'button';
+                if (isDanger) {
+                    confirmBtn.style.cssText = 'background: rgba(239, 68, 68, 0.12); border: 1.5px solid rgba(239, 68, 68, 0.35); color: #dc2626; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 0.85rem; cursor: pointer; backdrop-filter: blur(8px);';
+                } else {
+                    confirmBtn.style.cssText = 'background: rgba(16, 185, 129, 0.12); border: 1.5px solid rgba(16, 185, 129, 0.35); color: #047857; padding: 9px 18px; border-radius: 10px; font-weight: 700; font-size: 0.85rem; cursor: pointer; backdrop-filter: blur(8px);';
+                }
+                confirmBtn.textContent = confirmText;
+                confirmBtn.onclick = () => { overlay.classList.add('hidden'); resolve(true); };
+                btnsEl.appendChild(confirmBtn);
+
+                overlay.classList.remove('hidden');
+            });
+        }
+
+        function closeSpCustomModal() {
+            const overlay = document.getElementById('sp-custom-modal-overlay');
+            if (overlay) overlay.classList.add('hidden');
+        }
+
         function openSupabaseModal() {
             const overlay = document.getElementById('supabase-modal-overlay');
             if (overlay) overlay.classList.remove('hidden');
@@ -549,8 +659,9 @@
                     
                     if (data.sale_count > 0 && !data.is_expired) {
                         badge.textContent = 'Active (Live)';
-                        badge.style.background = '#dcfce7';
-                        badge.style.color = '#15803d';
+                        badge.style.background = 'rgba(16, 185, 129, 0.12)';
+                        badge.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+                        badge.style.color = '#047857';
                         actEl.textContent = data.active_sheets.length ? data.active_sheets.join(', ') : 'All Loaded';
                         
                         const mins = Math.floor((data.expires_in_seconds || 0) / 60);
@@ -559,15 +670,15 @@
                         timerEl.textContent = `${hrs}h ${remMins}m remaining (Auto-Expires)`;
                         timerEl.style.color = '#059669';
                     } else {
-                        badge.textContent = 'Nill (Empty)';
-                        badge.style.background = '#fee2e2';
+                        badge.textContent = 'Nill / Empty';
+                        badge.style.background = 'rgba(239, 68, 68, 0.1)';
+                        badge.style.border = '1px solid rgba(239, 68, 68, 0.25)';
                         badge.style.color = '#dc2626';
                         actEl.textContent = 'None (Database Clean)';
-                        timerEl.textContent = 'Expired / Cleared';
-                        timerEl.style.color = '#dc2626';
+                        timerEl.textContent = 'Expired / Standby';
+                        timerEl.style.color = '#94a3b8';
                     }
 
-                    // Populate checkboxes
                     checkList.innerHTML = '';
                     const available = data.available_sheets || ['2026-27', '2025-26'];
                     available.forEach(s => {
@@ -584,16 +695,34 @@
         }
 
         async function nillSupabaseCache() {
-            if (!confirm("Are you sure you want to completely NILL (empty) the Supabase cache?")) return;
+            const confirmed = await showSpCustomModal({
+                title: "Nill Database",
+                message: "Are you sure you want to completely NILL (empty) the Supabase cache?<br><br><span style='color:#dc2626; font-size:0.82rem; font-weight:700;'>All cache rows will be wiped to 0.</span>",
+                type: "danger",
+                confirmText: "YES, RESET TO 0",
+                cancelText: "CANCEL"
+            });
+            if (!confirmed) return;
+
             const badge = document.getElementById('sb-status-badge');
             badge.textContent = "Clearing...";
             try {
                 const res = await fetch('/api/nill-supabase-cache', { method: 'POST' });
                 const data = await res.json();
-                alert(data.message || "Database cleared successfully!");
+                await showSpCustomModal({
+                    title: "Database Reset",
+                    message: data.message || "Database wiped to 0 rows (Nilled) successfully!",
+                    type: "success",
+                    confirmText: "OK"
+                });
                 loadSupabaseStatus();
             } catch (err) {
-                alert("Failed to clear database: " + err.message);
+                await showSpCustomModal({
+                    title: "Error",
+                    message: "Failed to clear database: " + err.message,
+                    type: "danger",
+                    confirmText: "CLOSE"
+                });
             }
         }
 
@@ -601,7 +730,12 @@
         async function startSupabaseSync() {
             const checkedBoxes = Array.from(document.querySelectorAll('.sb-sheet-checkbox:checked')).map(cb => cb.value);
             if (!checkedBoxes.length) {
-                alert("Please select at least one sheet to send!");
+                await showSpCustomModal({
+                    title: "Sheet Selection Required",
+                    message: "Please select at least one sheet to send into the database!",
+                    type: "info",
+                    confirmText: "OK"
+                });
                 return;
             }
 
@@ -626,7 +760,12 @@
                 });
                 const data = await res.json();
                 if (data.status !== 'Success') {
-                    alert("Error: " + data.message);
+                    await showSpCustomModal({
+                        title: "Sync Error",
+                        message: data.message,
+                        type: "danger",
+                        confirmText: "CLOSE"
+                    });
                     syncBtn.disabled = false;
                     syncBtn.style.opacity = '1';
                     pWrap.style.display = 'none';
@@ -648,13 +787,23 @@
                             syncBtn.disabled = false;
                             syncBtn.style.opacity = '1';
                             pWrap.style.display = 'none';
-                            alert(pData.message || "Sync completed successfully!");
+                            await showSpCustomModal({
+                                title: "Sync Complete",
+                                message: pData.message || "Sync completed successfully! Data loaded into Supabase.",
+                                type: "success",
+                                confirmText: "EXCELLENT"
+                            });
                             loadSupabaseStatus();
                         } else if (pData.status === 'error') {
                             clearInterval(_sbPollTimer);
                             syncBtn.disabled = false;
                             syncBtn.style.opacity = '1';
-                            alert("Sync failed: " + pData.message);
+                            await showSpCustomModal({
+                                title: "Sync Failed",
+                                message: pData.message,
+                                type: "danger",
+                                confirmText: "CLOSE"
+                            });
                         }
                     } catch (e) {
                         console.error(e);
@@ -662,7 +811,12 @@
                 }, 1500);
 
             } catch (err) {
-                alert("Sync error: " + err.message);
+                await showSpCustomModal({
+                    title: "Connection Error",
+                    message: "Sync connection error: " + err.message,
+                    type: "danger",
+                    confirmText: "CLOSE"
+                });
                 syncBtn.disabled = false;
                 syncBtn.style.opacity = '1';
                 pWrap.style.display = 'none';
