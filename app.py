@@ -1,3 +1,16 @@
+import sys
+# Configure UTF-8 encoding for stdout and stderr on Windows and all platforms
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except Exception:
+        pass
+
 import os
 import sqlite3
 import io
@@ -4137,17 +4150,17 @@ def upload_files():
     """Handle file uploads, process data, merge with existing, deduplicate."""
     file_paths = {}
     try:
-        print("\n[UPLOAD] 📥 4 Excel files received. Processing & Deduplicating...", flush=True)
+        print("\n[UPLOAD] [INFO] 4 Excel files received. Processing & Deduplicating...", flush=True)
         required_files = ['sale_details', 'sale_summary', 'purchase_details', 'purchase_summary']
         
         for file_key in required_files:
             if file_key not in request.files:
-                print(f"[UPLOAD ERROR] ❌ Missing file: {file_key}", flush=True)
+                print(f"[UPLOAD ERROR] [FAIL] Missing file: {file_key}", flush=True)
                 return jsonify({'error': f'Missing file: {file_key}'}), 400
             
             file = request.files[file_key]
             if file.filename == '':
-                print(f"[UPLOAD ERROR] ❌ No file selected for: {file_key}", flush=True)
+                print(f"[UPLOAD ERROR] [FAIL] No file selected for: {file_key}", flush=True)
                 return jsonify({'error': f'No file selected for: {file_key}'}), 400
             
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], f'{file_key}_{file.filename}')
@@ -4157,7 +4170,7 @@ def upload_files():
         
         # Process and save new uploaded files directly using streaming
         stats = process_and_save_streaming(file_paths)
-        print(f"[UPLOAD SUCCESS] ✅ Sales: +{stats['sale_new']} new ({stats['sale_duplicates']} dups skipped) | Purchases: +{stats['purchase_new']} new ({stats['purchase_duplicates']} dups skipped)", flush=True)
+        print(f"[UPLOAD SUCCESS] [OK] Sales: +{stats['sale_new']} new ({stats['sale_duplicates']} dups skipped) | Purchases: +{stats['purchase_new']} new ({stats['purchase_duplicates']} dups skipped)", flush=True)
         
         # Clean up uploaded files to save disk space
         for path in file_paths.values():
@@ -4186,7 +4199,7 @@ def upload_files():
             'purchase_preview': preview_purchase,
         })
     except Exception as e:
-        print(f"[UPLOAD ERROR] ❌ Exception during upload: {str(e)}", flush=True)
+        print(f"[UPLOAD ERROR] [FAIL] Exception during upload: {str(e)}", flush=True)
         # Clean up files in case of error as well!
         for path in file_paths.values():
             try:
@@ -4327,12 +4340,12 @@ def prepare_sync():
         sheet_name = req_data.get('sheetName')
         mode = req_data.get('mode', 'append')
         
-        print(f"\n[SYNC PREPARE] 🔄 Target Sheet: '{sheet_name}', Mode: '{mode}'...", flush=True)
+        print(f"\n[SYNC PREPARE] [SYNC] Target Sheet: '{sheet_name}', Mode: '{mode}'...", flush=True)
         if not web_app_url:
-            print("[SYNC PREPARE ERROR] ❌ Google Web App URL is required", flush=True)
+            print("[SYNC PREPARE ERROR] [FAIL] Google Web App URL is required", flush=True)
             return jsonify({'error': 'Google Web App URL is required'}), 400
         if not sheet_name:
-            print("[SYNC PREPARE ERROR] ❌ Target Sheet Name is required", flush=True)
+            print("[SYNC PREPARE ERROR] [FAIL] Target Sheet Name is required", flush=True)
             return jsonify({'error': 'Target Sheet Name is required'}), 400
             
         existing_sale_ids = set()
@@ -4476,7 +4489,7 @@ def prepare_sync():
         import gc
         gc.collect()
         
-        print(f"[SYNC PREPARE SUCCESS] ✅ Ready to sync: {inserted_sale} sales, {inserted_purchase} purchases. (Skipped: {skipped_sale} sales, {skipped_purchase} purchases)", flush=True)
+        print(f"[SYNC PREPARE SUCCESS] [OK] Ready to sync: {inserted_sale} sales, {inserted_purchase} purchases. (Skipped: {skipped_sale} sales, {skipped_purchase} purchases)", flush=True)
         return jsonify({
             'success': True,
             'originalSale': original_sale_count,
@@ -4487,7 +4500,7 @@ def prepare_sync():
             'toSyncPurchase': inserted_purchase,
         })
     except Exception as e:
-        print(f"[SYNC PREPARE ERROR] ❌ Exception in prepare_sync: {str(e)}", flush=True)
+        print(f"[SYNC PREPARE ERROR] [FAIL] Exception in prepare_sync: {str(e)}", flush=True)
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
@@ -4569,7 +4582,7 @@ def send_sync_chunk():
         payload = data.get('payload')
         
         if not web_app_url or not payload:
-            print("[SYNC CHUNK ERROR] ❌ Missing webAppUrl or payload in request", flush=True)
+            print("[SYNC CHUNK ERROR] [FAIL] Missing webAppUrl or payload in request", flush=True)
             return jsonify({'success': False, 'error': 'Missing webAppUrl or payload'}), 400
             
         try:
@@ -4610,7 +4623,7 @@ def send_sync_chunk():
             print(f"[{now_str}] Updating data to database... (Batch {b_idx}/{b_tot} done | Remaining: {remaining})", flush=True)
         return jsonify(result)
     except Exception as e:
-        print(f"[SYNC CHUNK EXCEPTION] ❌ {str(e)}", flush=True)
+        print(f"[SYNC CHUNK EXCEPTION] [FAIL] {str(e)}", flush=True)
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 

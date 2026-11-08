@@ -498,7 +498,7 @@ processBtn.addEventListener('click', async () => {
 
         progressFill.style.width = '100%';
 
-        loaderText.textContent = 'Done! ✅';
+        loaderText.textContent = 'Done!';
 
 
 
@@ -1346,7 +1346,7 @@ async function refreshSheetDropdown() {
 
         console.warn('[Sheet Connect Warning]', e);
 
-        showToast('⚠️', 'Google Sheet URL not connected. Click ⚙️ Settings to configure URL.');
+        showToast('⚠️', 'Google Sheet URL not connected. Click Settings to configure URL.');
 
     }
 
