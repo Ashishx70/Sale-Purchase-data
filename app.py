@@ -2807,7 +2807,7 @@ def nill_supabase_tables():
     try:
         # Preserve multi-year settings before nilling cache rows
         cur_urls, cur_sheet_urls = load_fy_all_settings()
-        requests.delete(f"{SUPABASE_URL}/rest/v1/sale_cache?key=not.is.null", headers=headers, timeout=30)
+        requests.delete(f"{SUPABASE_URL}/rest/v1/sale_cache?sheet_name=neq.__SYS__", headers=headers, timeout=30)
         requests.delete(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.is.null", headers=headers, timeout=30)
         save_supabase_session({"synced_at": 0, "active_sheets": []})
         save_fy_settings_file(cur_urls, cur_sheet_urls)
