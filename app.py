@@ -2798,10 +2798,14 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
     
     total_sale_all = 0
     total_purchase_all = 0
+    num_sheets = max(1, len(selected_sheets))
     
     for s_idx, target in enumerate(selected_sheets):
-        _supabase_sync_status["message"] = f"Fetching Google Sheet data for '{target}'..."
-        _supabase_sync_status["percent"] = int(10 + (s_idx / max(1, len(selected_sheets))) * 80)
+        sheet_base_pct = int((s_idx / num_sheets) * 90)
+        sheet_span = int(90 / num_sheets)
+        
+        _supabase_sync_status["message"] = f"Downloading '{target}' from Google Sheets..."
+        _supabase_sync_status["percent"] = max(5, sheet_base_pct)
         
         meta = get_gviz_metadata(target)
         if not meta:
@@ -2818,10 +2822,11 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
             if r_sale.status_code == 200:
                 reader = csv.reader(io.StringIO(r_sale.text))
                 rows = list(reader)
+                total_data_rows = max(1, len(rows) - 1)
                 if len(rows) > 1:
                     batch = []
                     seen = set()
-                    for r in rows[1:]:
+                    for r_idx, r in enumerate(rows[1:]):
                         if len(r) < 5: continue
                         k = str(r[1]).strip().upper()
                         if not k or k in seen: continue
@@ -2840,9 +2845,12 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
                             "state": str(r[4]).strip()[:50],
                             "sheet_name": target
                         })
-                        if len(batch) >= 1000:
+                        if len(batch) >= 2000:
                             requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
                             total_sale_all += len(batch)
+                            pct_now = sheet_base_pct + int((r_idx / total_data_rows) * (sheet_span * 0.5))
+                            _supabase_sync_status["percent"] = min(95, max(5, pct_now))
+                            _supabase_sync_status["message"] = f"Saving '{target}' Sales: {total_sale_all:,} rows ({pct_now}%)..."
                             _supabase_sync_status["sale_synced"] = total_sale_all
                             batch = []
                     if batch:
@@ -2854,16 +2862,18 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
 
         # 2. Fetch Purchases
         try:
+            _supabase_sync_status["message"] = f"Downloading '{target}' Purchases..."
             q_purch = urllib.parse.quote("SELECT AP, BH, BI, BJ WHERE BH IS NOT NULL")
             gviz_url_purch = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_purch}"
             r_purch = requests.get(gviz_url_purch, timeout=120)
             if r_purch.status_code == 200:
                 reader = csv.reader(io.StringIO(r_purch.text))
                 p_rows = list(reader)
+                total_p_rows = max(1, len(p_rows) - 1)
                 if len(p_rows) > 1:
                     p_batch = []
                     p_seen = set()
-                    for pr in p_rows[1:]:
+                    for pr_idx, pr in enumerate(p_rows[1:]):
                         if len(pr) < 4: continue
                         pk = str(pr[1]).strip().upper()
                         if not pk or pk in p_seen: continue
@@ -2881,9 +2891,12 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
                             "rate": prate,
                             "sheet_name": target
                         })
-                        if len(p_batch) >= 1000:
+                        if len(p_batch) >= 2000:
                             requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
                             total_purchase_all += len(p_batch)
+                            pct_now = sheet_base_pct + int(sheet_span * 0.5) + int((pr_idx / total_p_rows) * (sheet_span * 0.45))
+                            _supabase_sync_status["percent"] = min(98, max(5, pct_now))
+                            _supabase_sync_status["message"] = f"Saving '{target}' Purchases: {total_purchase_all:,} rows ({pct_now}%)..."
                             _supabase_sync_status["purchase_synced"] = total_purchase_all
                             p_batch = []
                     if p_batch:
