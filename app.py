@@ -4341,9 +4341,11 @@ def prepare_sync():
         mode = req_data.get('mode', 'append')
         
         print(f"\n[SYNC PREPARE] [SYNC] Target Sheet: '{sheet_name}', Mode: '{mode}'...", flush=True)
-        if not web_app_url:
-            print("[SYNC PREPARE ERROR] [FAIL] Google Web App URL is required", flush=True)
-            return jsonify({'error': 'Google Web App URL is required'}), 400
+        from sheets_direct_sync import is_direct_sync_available
+        direct_active = is_direct_sync_available()
+        if not direct_active and not web_app_url:
+            print("[SYNC PREPARE ERROR] [FAIL] Google Web App URL is required (Legacy Mode)", flush=True)
+            return jsonify({'error': 'Google Web App URL is required for legacy mode'}), 400
         if not sheet_name:
             print("[SYNC PREPARE ERROR] [FAIL] Target Sheet Name is required", flush=True)
             return jsonify({'error': 'Target Sheet Name is required'}), 400

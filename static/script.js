@@ -3035,7 +3035,7 @@ function addFYSettingRowElement(fy = '', webAppUrl = '', sheetUrl = '') {
 
                 <label style="font-size:0.72rem; color:var(--text-secondary); font-weight:600; display:flex; justify-content:space-between; margin-bottom:3px;">
 
-                    <span>Google Web App URL <span style="font-weight:normal; color:var(--text-muted);">(Used for Data Adding / Syncing)</span></span>
+                    <span>Google Web App URL <span style="font-weight:normal; color:var(--text-muted);">(Optional / Legacy Fallback)</span></span>
 
                 </label>
 
