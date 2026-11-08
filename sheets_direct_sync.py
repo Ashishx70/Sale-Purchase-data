@@ -105,30 +105,115 @@ def get_spreadsheet_id_for_target(sheet_name, web_app_url=None):
     """Resolve spreadsheet ID for target sheet or financial year."""
     fy_settings_path = os.path.join(WORKSPACE, 'fy_settings.json')
     sheet_urls = {}
+    urls = {}
     if os.path.exists(fy_settings_path):
         try:
             with open(fy_settings_path, 'r', encoding='utf-8') as f:
                 d = json.load(f)
                 sheet_urls = d.get('sheet_urls', {})
+                urls = d.get('urls', {})
         except Exception:
             pass
 
-    target_fy = '2026-27'
-    for fy in ['2025-26', '2026-27', '2027-28', '2024-25']:
-        if fy in str(sheet_name):
-            target_fy = fy
-            break
-
-    if target_fy in sheet_urls and sheet_urls[target_fy]:
-        sid = extract_spreadsheet_id(sheet_urls[target_fy])
+    # 1. Exact match in sheet_urls
+    if sheet_name in sheet_urls and sheet_urls[sheet_name]:
+        sid = extract_spreadsheet_id(sheet_urls[sheet_name])
         if sid:
             return sid
+
+    # 2. Check passed web_app_url
+    if web_app_url:
+        sid = extract_spreadsheet_id(web_app_url)
+        if sid:
+            return sid
+
+    # 3. Check keys in sheet_urls sorted by length descending
+    for k in sorted(sheet_urls.keys(), key=lambda x: len(x), reverse=True):
+        if k in str(sheet_name) and sheet_urls.get(k):
+            sid = extract_spreadsheet_id(sheet_urls[k])
+            if sid:
+                return sid
 
     hardcoded = {
         '2025-26': '1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To',
         '2026-27': '1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w'
     }
-    return hardcoded.get(target_fy, hardcoded['2026-27'])
+    return hardcoded.get(str(sheet_name), hardcoded['2026-27'])
+
+def read_sheet_sales_and_purchases_direct(spreadsheet_id, target_name):
+    """
+    Read all Sales and Purchases directly from Google Sheets API v4 using Service Account.
+    Works for private sheets shared with service account, 100% immune to GViz 401 errors.
+    """
+    service = get_sheets_service()
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    sheet_title = meta['sheets'][0]['properties']['title']
+
+    res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{sheet_title}'!A1:BJ"
+    ).execute()
+
+    rows = res.get('values', [])
+    if not rows:
+        return [], []
+
+    # Detect header row
+    start_row = 1
+    for idx, r in enumerate(rows[:5]):
+        if len(r) > 26 and 'UNIQUE ID' in str(r[26]).upper():
+            start_row = idx + 1
+            break
+
+    sale_rows = []
+    seen_sale = set()
+    purch_rows = []
+    seen_purch = set()
+
+    for r in rows[start_row:]:
+        # 1. Sales: E (idx 4), AA (idx 26), AB (idx 27), AC (idx 28), AL (idx 37)
+        if len(r) > 26:
+            k = str(r[26]).strip().upper()
+            if k and k not in seen_sale and 'UNIQUE' not in k:
+                seen_sale.add(k)
+                seller = str(r[4]).strip()[:150] if len(r) > 4 else ''
+                qty_raw = str(r[27]).replace(',', '').strip() if len(r) > 27 else '0'
+                rate_raw = str(r[28]).replace(',', '').strip() if len(r) > 28 else '0'
+                state = str(r[37]).strip()[:50] if len(r) > 37 else ''
+                try: qty = float(qty_raw) if qty_raw else 0.0
+                except ValueError: qty = 0.0
+                try: rate = float(rate_raw) if rate_raw else 0.0
+                except ValueError: rate = 0.0
+                sale_rows.append({
+                    "key": k,
+                    "seller_name": seller,
+                    "qty": qty,
+                    "rate": rate,
+                    "state": state,
+                    "sheet_name": target_name
+                })
+
+        # 2. Purchases: AP (idx 41), BH (idx 59), BI (idx 60), BJ (idx 61)
+        if len(r) > 59:
+            pk = str(r[59]).strip().upper()
+            if pk and pk not in seen_purch and 'UNIQUE' not in pk:
+                seen_purch.add(pk)
+                pseller = str(r[41]).strip()[:150] if len(r) > 41 else ''
+                pqty_raw = str(r[60]).replace(',', '').strip() if len(r) > 60 else '0'
+                prate_raw = str(r[61]).replace(',', '').strip() if len(r) > 61 else '0'
+                try: pqty = float(pqty_raw) if pqty_raw else 0.0
+                except ValueError: pqty = 0.0
+                try: prate = float(prate_raw) if prate_raw else 0.0
+                except ValueError: prate = 0.0
+                purch_rows.append({
+                    "key": pk,
+                    "seller_name": pseller,
+                    "qty": pqty,
+                    "rate": prate,
+                    "sheet_name": target_name
+                })
+
+    return sale_rows, purch_rows
 
 def get_existing_unique_ids_fast(spreadsheet_id, tab_name):
     """Fetch existing Sale & Purchase unique IDs directly via Google Sheets API (Fast: < 1.5s)."""

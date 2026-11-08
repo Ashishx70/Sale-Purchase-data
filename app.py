@@ -2891,114 +2891,121 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
         sheet_base_pct = int((s_idx / num_sheets) * 90)
         sheet_span = int(90 / num_sheets)
         
-        _supabase_sync_status["message"] = f"Downloading '{target}' from Google Sheets..."
+        _supabase_sync_status["message"] = f"Reading '{target}' from Google Sheets..."
         _supabase_sync_status["percent"] = max(5, sheet_base_pct)
-        print(f"[SUPABASE SYNC] [{target}] Downloading Sales from Google Sheets...", flush=True)
-        
-        meta = get_gviz_metadata(target)
-        if not meta:
-            print(f"[SUPABASE SYNC] [{target}] [WARN] Could not retrieve metadata, skipping.", flush=True)
-            continue
-            
-        ss_id = meta.get("spreadsheet_id")
-        gid = meta.get("gid", "0")
-        
-        # 1. Fetch Sales
-        try:
-            q_sale = urllib.parse.quote("SELECT E, AA, AB, AC, AL")
-            gviz_url_sale = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_sale}"
-            r_sale = requests.get(gviz_url_sale, timeout=120)
-            if r_sale.status_code == 200:
-                reader = csv.reader(io.StringIO(r_sale.text))
-                rows = list(reader)
-                total_data_rows = max(1, len(rows) - 1)
-                if len(rows) > 1:
-                    batch = []
-                    seen = set()
-                    for r_idx, r in enumerate(rows[1:]):
-                        if len(r) < 5: continue
-                        k = str(r[1]).strip().upper()
-                        if not k or k in seen: continue
-                        seen.add(k)
-                        try:
-                            qty = float(str(r[2]).replace(',', '').strip()) if r[2] else 0.0
-                        except ValueError: qty = 0.0
-                        try:
-                            rate = float(str(r[3]).replace(',', '').strip()) if r[3] else 0.0
-                        except ValueError: rate = 0.0
-                        batch.append({
-                            "key": k,
-                            "seller_name": str(r[0]).strip()[:150],
-                            "qty": qty,
-                            "rate": rate,
-                            "state": str(r[4]).strip()[:50],
-                            "sheet_name": target
-                        })
-                        if len(batch) >= 2000:
-                            requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
-                            total_sale_all += len(batch)
-                            pct_now = sheet_base_pct + int((r_idx / total_data_rows) * (sheet_span * 0.5))
-                            _supabase_sync_status["percent"] = min(95, max(5, pct_now))
-                            _supabase_sync_status["message"] = f"Saving '{target}' Sales: {total_sale_all:,} rows ({pct_now}%)..."
-                            _supabase_sync_status["sale_synced"] = total_sale_all
-                            print(f"[SUPABASE SYNC] [{target}] Uploaded Sales batch: +{len(batch):,} rows | Total Sales: {total_sale_all:,} ({pct_now}%)", flush=True)
-                            batch = []
-                    if batch:
-                        requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
-                        total_sale_all += len(batch)
-                        _supabase_sync_status["sale_synced"] = total_sale_all
-                        print(f"[SUPABASE SYNC] [{target}] Uploaded final Sales batch: +{len(batch):,} rows | Total Sales: {total_sale_all:,}", flush=True)
-        except Exception as err:
-            print(f"[SYNC SALE ERROR] {target}: {err}", flush=True)
+        print(f"[SUPABASE SYNC] [{target}] Reading data for Supabase sync...", flush=True)
 
-        # 2. Fetch Purchases
+        sale_rows = []
+        purch_rows = []
+
+        # 1. Try Direct Google Sheets API via Service Account (Best, Authenticated, works on private sheets)
         try:
-            _supabase_sync_status["message"] = f"Downloading '{target}' Purchases..."
-            print(f"[SUPABASE SYNC] [{target}] Downloading Purchases from Google Sheets...", flush=True)
-            q_purch = urllib.parse.quote("SELECT AP, BH, BI, BJ WHERE BH IS NOT NULL")
-            gviz_url_purch = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_purch}"
-            r_purch = requests.get(gviz_url_purch, timeout=120)
-            if r_purch.status_code == 200:
-                reader = csv.reader(io.StringIO(r_purch.text))
-                p_rows = list(reader)
-                total_p_rows = max(1, len(p_rows) - 1)
-                if len(p_rows) > 1:
-                    p_batch = []
-                    p_seen = set()
-                    for pr_idx, pr in enumerate(p_rows[1:]):
-                        if len(pr) < 4: continue
-                        pk = str(pr[1]).strip().upper()
-                        if not pk or pk in p_seen: continue
-                        p_seen.add(pk)
-                        try:
-                            pqty = float(str(pr[2]).replace(',', '').strip()) if pr[2] else 0.0
-                        except ValueError: pqty = 0.0
-                        try:
-                            prate = float(str(pr[3]).replace(',', '').strip()) if pr[3] else 0.0
-                        except ValueError: prate = 0.0
-                        p_batch.append({
-                            "key": pk,
-                            "seller_name": str(pr[0]).strip()[:150],
-                            "qty": pqty,
-                            "rate": prate,
-                            "sheet_name": target
-                        })
-                        if len(p_batch) >= 2000:
-                            requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
-                            total_purchase_all += len(p_batch)
-                            pct_now = sheet_base_pct + int(sheet_span * 0.5) + int((pr_idx / total_p_rows) * (sheet_span * 0.45))
-                            _supabase_sync_status["percent"] = min(98, max(5, pct_now))
-                            _supabase_sync_status["message"] = f"Saving '{target}' Purchases: {total_purchase_all:,} rows ({pct_now}%)..."
-                            _supabase_sync_status["purchase_synced"] = total_purchase_all
-                            print(f"[SUPABASE SYNC] [{target}] Uploaded Purchases batch: +{len(p_batch):,} rows | Total Purchases: {total_purchase_all:,} ({pct_now}%)", flush=True)
-                            p_batch = []
-                    if p_batch:
-                        requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
-                        total_purchase_all += len(p_batch)
-                        _supabase_sync_status["purchase_synced"] = total_purchase_all
-                        print(f"[SUPABASE SYNC] [{target}] Uploaded final Purchases batch: +{len(p_batch):,} rows | Total Purchases: {total_purchase_all:,}", flush=True)
-        except Exception as p_err:
-            print(f"[SYNC PURCH ERROR] {target}: {p_err}", flush=True)
+            from sheets_direct_sync import is_direct_sync_available, get_spreadsheet_id_for_target, read_sheet_sales_and_purchases_direct
+            if is_direct_sync_available():
+                direct_sid = get_spreadsheet_id_for_target(target)
+                if direct_sid:
+                    print(f"[SUPABASE SYNC] [{target}] Using authenticated Google Sheets API v4 (SSID: {direct_sid})...", flush=True)
+                    sale_rows, purch_rows = read_sheet_sales_and_purchases_direct(direct_sid, target)
+                    print(f"[SUPABASE SYNC] [{target}] Direct API fetched {len(sale_rows):,} sales & {len(purch_rows):,} purchases!", flush=True)
+        except Exception as direct_err:
+            print(f"[SUPABASE SYNC] [{target}] Direct API error: {direct_err}. Trying GViz fallback...", flush=True)
+
+        # 2. Fallback to GViz if Direct API was unavailable or returned empty
+        if not sale_rows and not purch_rows:
+            meta = get_gviz_metadata(target)
+            if meta:
+                ss_id = meta.get("spreadsheet_id")
+                gid = meta.get("gid", "0")
+                # 1. Fetch Sales via GViz
+                try:
+                    q_sale = urllib.parse.quote("SELECT E, AA, AB, AC, AL")
+                    gviz_url_sale = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_sale}"
+                    r_sale = requests.get(gviz_url_sale, timeout=120)
+                    if r_sale.status_code == 200:
+                        reader = csv.reader(io.StringIO(r_sale.text))
+                        rows = list(reader)
+                        if len(rows) > 1:
+                            seen = set()
+                            for r in rows[1:]:
+                                if len(r) < 5: continue
+                                k = str(r[1]).strip().upper()
+                                if not k or k in seen: continue
+                                seen.add(k)
+                                try: qty = float(str(r[2]).replace(',', '').strip()) if r[2] else 0.0
+                                except ValueError: qty = 0.0
+                                try: rate = float(str(r[3]).replace(',', '').strip()) if r[3] else 0.0
+                                except ValueError: rate = 0.0
+                                sale_rows.append({
+                                    "key": k,
+                                    "seller_name": str(r[0]).strip()[:150],
+                                    "qty": qty,
+                                    "rate": rate,
+                                    "state": str(r[4]).strip()[:50],
+                                    "sheet_name": target
+                                })
+                    else:
+                        print(f"[SUPABASE SYNC] [{target}] GViz Sales returned HTTP {r_sale.status_code}", flush=True)
+                except Exception as err:
+                    print(f"[SYNC SALE ERROR] {target}: {err}", flush=True)
+
+                # 2. Fetch Purchases via GViz
+                try:
+                    q_purch = urllib.parse.quote("SELECT AP, BH, BI, BJ WHERE BH IS NOT NULL")
+                    gviz_url_purch = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_purch}"
+                    r_purch = requests.get(gviz_url_purch, timeout=120)
+                    if r_purch.status_code == 200:
+                        reader = csv.reader(io.StringIO(r_purch.text))
+                        p_rows = list(reader)
+                        if len(p_rows) > 1:
+                            p_seen = set()
+                            for pr in p_rows[1:]:
+                                if len(pr) < 4: continue
+                                pk = str(pr[1]).strip().upper()
+                                if not pk or pk in p_seen: continue
+                                p_seen.add(pk)
+                                try: pqty = float(str(pr[2]).replace(',', '').strip()) if pr[2] else 0.0
+                                except ValueError: pqty = 0.0
+                                try: prate = float(str(pr[3]).replace(',', '').strip()) if pr[3] else 0.0
+                                except ValueError: prate = 0.0
+                                purch_rows.append({
+                                    "key": pk,
+                                    "seller_name": str(pr[0]).strip()[:150],
+                                    "qty": pqty,
+                                    "rate": prate,
+                                    "sheet_name": target
+                                })
+                    else:
+                        print(f"[SUPABASE SYNC] [{target}] GViz Purchases returned HTTP {r_purch.status_code}", flush=True)
+                except Exception as p_err:
+                    print(f"[SYNC PURCH ERROR] {target}: {p_err}", flush=True)
+
+        if not sale_rows and not purch_rows:
+            print(f"[SUPABASE SYNC] [{target}] [WARN] No data rows could be retrieved from sheet! Check permissions.", flush=True)
+            continue
+
+        # Upload Sales to Supabase in batches of 2000
+        total_s_count = len(sale_rows)
+        for s_chunk_start in range(0, total_s_count, 2000):
+            batch = sale_rows[s_chunk_start:s_chunk_start + 2000]
+            requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
+            total_sale_all += len(batch)
+            pct_now = sheet_base_pct + int((min(total_s_count, s_chunk_start + 2000) / max(1, total_s_count)) * (sheet_span * 0.5))
+            _supabase_sync_status["percent"] = min(95, max(5, pct_now))
+            _supabase_sync_status["message"] = f"Saving '{target}' Sales: {total_sale_all:,} rows ({pct_now}%)..."
+            _supabase_sync_status["sale_synced"] = total_sale_all
+            print(f"[SUPABASE SYNC] [{target}] Uploaded Sales batch: +{len(batch):,} rows | Total Sales: {total_sale_all:,} ({pct_now}%)", flush=True)
+
+        # Upload Purchases to Supabase in batches of 2000
+        total_p_count = len(purch_rows)
+        for p_chunk_start in range(0, total_p_count, 2000):
+            p_batch = purch_rows[p_chunk_start:p_chunk_start + 2000]
+            requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
+            total_purchase_all += len(p_batch)
+            pct_now = sheet_base_pct + int(sheet_span * 0.5) + int((min(total_p_count, p_chunk_start + 2000) / max(1, total_p_count)) * (sheet_span * 0.45))
+            _supabase_sync_status["percent"] = min(98, max(5, pct_now))
+            _supabase_sync_status["message"] = f"Saving '{target}' Purchases: {total_purchase_all:,} rows ({pct_now}%)..."
+            _supabase_sync_status["purchase_synced"] = total_purchase_all
+            print(f"[SUPABASE SYNC] [{target}] Uploaded Purchases batch: +{len(p_batch):,} rows | Total Purchases: {total_purchase_all:,} ({pct_now}%)", flush=True)
 
     save_supabase_session({
         "synced_at": time.time(),
