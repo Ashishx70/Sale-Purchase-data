@@ -6,3 +6,7 @@ sale_cache.db-wal
 sale_cache.db-shm
 *.log
 uploads/
+*.db
+local_store.db
+migrate_to_supabase.py
+

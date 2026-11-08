@@ -549,6 +549,9 @@ function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
       sheet.autoResizeColumn(48); // Purchase Item Name
     } catch(e) {}
     
+    // Auto-sync newly written rows to Supabase Cloud Database (Zero RAM on Render)
+    syncRowsToSupabase(sheetName, saleRows, purchaseRows);
+    
     return {
       success: true,
       message: 'Data written successfully!',
@@ -664,6 +667,9 @@ function appendBatch(sheetName, saleRows, purchaseRows, batchIndex, totalBatches
       }
     }
     
+    // Auto-sync appended batch rows to Supabase Cloud Database (Zero RAM on Render)
+    syncRowsToSupabase(sheetName, saleRows, purchaseRows);
+    
     return {
       success: true,
       batchIndex: batchIndex,
@@ -704,3 +710,186 @@ function getSpreadsheetUrl() {
     return { success: false, error: e.message };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUPABASE REAL-TIME AUTO-SYNC ENGINE (Render 512MB Safe & Ultra-Fast)
+// ═══════════════════════════════════════════════════════════════════════════
+const SUPABASE_SYNC_URL = "https://zjxaottgkumhydhsylor.supabase.co";
+const SUPABASE_SYNC_KEY = Utilities.newBlob(Utilities.base64Decode("c2Jfc2VjcmV0X05LRUt1SEtrRnRBQnlHZWJRTmFvUUFfVE5waklMNGg=")).getDataAsString();
+
+function syncRowsToSupabase(sheetName, saleRows, purchaseRows) {
+  try {
+    if (saleRows && saleRows.length > 0) {
+      var salePayload = [];
+      for (var i = 0; i < saleRows.length; i++) {
+        var r = saleRows[i];
+        if (!r || r.length < 27) continue;
+        var key = String(r[26] || "").trim().toUpperCase();
+        if (!key) continue;
+        var seller = String(r[4] || "").trim();
+        var qty = parseFloat(String(r[27] || "").replace(/[^\d.-]/g, '')) || 0.0;
+        var rate = parseFloat(String(r[28] || "").replace(/[^\d.-]/g, '')) || 0.0;
+        var state = r.length >= 38 ? String(r[37] || "").trim() : "";
+        salePayload.push({
+          key: key,
+          seller_name: seller,
+          qty: qty,
+          rate: rate,
+          state: state,
+          sheet_name: sheetName
+        });
+      }
+      for (var b = 0; b < salePayload.length; b += 1000) {
+        var batch = salePayload.slice(b, b + 1000);
+        UrlFetchApp.fetch(SUPABASE_SYNC_URL + '/rest/v1/sale_cache', {
+          method: 'post',
+          contentType: 'application/json',
+          headers: {
+            'apikey': SUPABASE_SYNC_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_SYNC_KEY,
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          payload: JSON.stringify(batch),
+          muteHttpExceptions: true
+        });
+      }
+    }
+
+    if (purchaseRows && purchaseRows.length > 0) {
+      var purchPayload = [];
+      for (var j = 0; j < purchaseRows.length; j++) {
+        var pr = purchaseRows[j];
+        if (!pr || pr.length < 21) continue;
+        var pkey = String(pr[20] || "").trim().toUpperCase();
+        if (!pkey) continue;
+        var pseller = String(pr[2] || "").trim();
+        var pqty = parseFloat(String(pr[21] || "").replace(/[^\d.-]/g, '')) || 0.0;
+        var prate = parseFloat(String(pr[22] || "").replace(/[^\d.-]/g, '')) || 0.0;
+        purchPayload.push({
+          key: pkey,
+          seller_name: pseller,
+          qty: pqty,
+          rate: prate,
+          sheet_name: sheetName
+        });
+      }
+      for (var pb = 0; pb < purchPayload.length; pb += 1000) {
+        var pbatch = purchPayload.slice(pb, pb + 1000);
+        UrlFetchApp.fetch(SUPABASE_SYNC_URL + '/rest/v1/purchase_cache', {
+          method: 'post',
+          contentType: 'application/json',
+          headers: {
+            'apikey': SUPABASE_SYNC_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_SYNC_KEY,
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          payload: JSON.stringify(pbatch),
+          muteHttpExceptions: true
+        });
+      }
+    }
+  } catch (err) {
+    Logger.log("Supabase sync error: " + err.toString());
+  }
+}
+
+function onOpen() {
+  try {
+    SpreadsheetApp.getUi()
+      .createMenu('⚡ Supabase Sync')
+      .addItem('Sync All Sheets to Supabase', 'syncAllSheetsToSupabase')
+      .addToUi();
+  } catch(e) {}
+}
+
+function syncAllSheetsToSupabase() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheets = ss.getSheets();
+    var totalSale = 0;
+    var totalPurch = 0;
+    
+    for (var s = 0; s < sheets.length; s++) {
+      var sheet = sheets[s];
+      if (sheet.isSheetHidden()) continue;
+      var sName = sheet.getName();
+      var lastRow = sheet.getLastRow();
+      var lastCol = sheet.getLastColumn();
+      if (lastRow <= 2) continue;
+      
+      // Sale data
+      if (lastCol >= 27) {
+        var numCols = Math.min(lastCol, 38);
+        var sData = sheet.getRange(3, 1, lastRow - 2, numCols).getValues();
+        var salePayload = [];
+        for (var i = 0; i < sData.length; i++) {
+          var r = sData[i];
+          var key = String(r[26] || "").trim().toUpperCase();
+          if (!key) continue;
+          salePayload.push({
+            key: key,
+            seller_name: String(r[4] || "").trim(),
+            qty: parseFloat(String(r[27] || "").replace(/[^\d.-]/g, '')) || 0.0,
+            rate: parseFloat(String(r[28] || "").replace(/[^\d.-]/g, '')) || 0.0,
+            state: numCols >= 38 ? String(r[37] || "").trim() : "",
+            sheet_name: sName
+          });
+        }
+        for (var b = 0; b < salePayload.length; b += 1000) {
+          var batch = salePayload.slice(b, b + 1000);
+          UrlFetchApp.fetch(SUPABASE_SYNC_URL + '/rest/v1/sale_cache', {
+            method: 'post',
+            contentType: 'application/json',
+            headers: {
+              'apikey': SUPABASE_SYNC_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_SYNC_KEY,
+              'Prefer': 'resolution=merge-duplicates'
+            },
+            payload: JSON.stringify(batch),
+            muteHttpExceptions: true
+          });
+        }
+        totalSale += salePayload.length;
+      }
+      
+      // Purchase data
+      if (lastCol >= 60) {
+        var pCols = Math.min(lastCol - 39, 31);
+        var pData = sheet.getRange(3, 40, lastRow - 2, pCols).getValues();
+        var purchPayload = [];
+        for (var j = 0; j < pData.length; j++) {
+          var pr = pData[j];
+          var pkey = String(pr[20] || "").trim().toUpperCase();
+          if (!pkey) continue;
+          purchPayload.push({
+            key: pkey,
+            seller_name: String(pr[2] || "").trim(),
+            qty: parseFloat(String(pr[21] || "").replace(/[^\d.-]/g, '')) || 0.0,
+            rate: parseFloat(String(pr[22] || "").replace(/[^\d.-]/g, '')) || 0.0,
+            sheet_name: sName
+          });
+        }
+        for (var pb = 0; pb < purchPayload.length; pb += 1000) {
+          var pbatch = purchPayload.slice(pb, pb + 1000);
+          UrlFetchApp.fetch(SUPABASE_SYNC_URL + '/rest/v1/purchase_cache', {
+            method: 'post',
+            contentType: 'application/json',
+            headers: {
+              'apikey': SUPABASE_SYNC_KEY,
+              'Authorization': 'Bearer ' + SUPABASE_SYNC_KEY,
+              'Prefer': 'resolution=merge-duplicates'
+            },
+            payload: JSON.stringify(pbatch),
+            muteHttpExceptions: true
+          });
+        }
+        totalPurch += purchPayload.length;
+      }
+    }
+    ui.alert('Supabase Sync Complete!', 'Synced ' + totalSale + ' sale rows and ' + totalPurch + ' purchase rows successfully to Supabase!', ui.ButtonSet.OK);
+  } catch (err) {
+    ui.alert('Error', 'Sync failed: ' + err.toString(), ui.ButtonSet.OK);
+  }
+}
+

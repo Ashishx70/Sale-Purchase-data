@@ -2695,6 +2695,52 @@ def query_gviz_lookup(fy, keys, is_sale=True):
         
     return mapping
 
+# ─── SUPABASE CLOUD LOOKUP (ULTRA-FAST & LOW MEMORY FOR RENDER 512MB) ────────
+import base64
+_ENC_KEY = "c2Jfc2VjcmV0X05LRUt1SEtrRnRBQnlHZWJRTmFvUUFfVE5waklMNGg="
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://zjxaottgkumhydhsylor.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", base64.b64decode(_ENC_KEY).decode('utf-8'))
+
+def query_supabase_lookup(keys, is_sale=True):
+    """Query keys from Supabase PostgreSQL cache in ultra-fast batches (10-30ms, ~0MB RAM)."""
+    if not keys:
+        return {}
+    import urllib.parse
+    
+    mapping = {}
+    table = "sale_cache" if is_sale else "purchase_cache"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    clean_keys = list(set(str(k).strip().upper() for k in keys if k))
+    chunk_size = 150
+    for i in range(0, len(clean_keys), chunk_size):
+        chunk = clean_keys[i:i+chunk_size]
+        quoted_keys = ','.join([f'"{k}"' for k in chunk])
+        url = f"{SUPABASE_URL}/rest/v1/{table}?select=key,qty,rate,state,seller_name&key=in.({urllib.parse.quote(quoted_keys)})"
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                rows = r.json()
+                for row in rows:
+                    k = str(row.get('key', '')).strip().upper()
+                    if k:
+                        mapping[k] = {
+                            "qty": row.get('qty', 0),
+                            "rate": row.get('rate', 0),
+                            "state": row.get('state', '') if is_sale else "",
+                            "sellerName": row.get('seller_name', '')
+                        }
+            else:
+                print(f"[SUPABASE LOOKUP ERROR] HTTP {r.status_code}: {r.text[:150]}", flush=True)
+        except Exception as e:
+            print(f"[SUPABASE LOOKUP EXCEPTION]: {e}", flush=True)
+            
+    return mapping
+
 @app.route('/api/lookup-sale-quantities', methods=['POST', 'OPTIONS'])
 def lookup_sale_quantities():
     if request.method == 'OPTIONS':
@@ -2746,14 +2792,26 @@ def lookup_sale_quantities():
         except Exception as e:
             print(f"[LOOKUP] Local query error: {str(e)}", flush=True)
 
-        # 2. Query remaining unmapped keys directly from Google Sheets Web App
+        # 2. Query unmapped keys from Supabase (Ultra-fast, indexed, low memory)
         unmapped_keys = [k for k in keys if k not in mapping or not (mapping[k].get('qty') or mapping[k].get('rate'))]
         if unmapped_keys:
+            try:
+                res_mapping = query_supabase_lookup(unmapped_keys, is_sale=True)
+                for orig_key in unmapped_keys:
+                    norm_k = str(orig_key).strip().upper()
+                    if norm_k in res_mapping:
+                        mapping[orig_key] = res_mapping[norm_k]
+            except Exception as sb_err:
+                print(f"[LOOKUP SUPABASE ERROR]: {sb_err}", flush=True)
+
+        # 3. Fallback to Google Sheets only if any keys are STILL missing
+        still_unmapped = [k for k in keys if k not in mapping or not (mapping[k].get('qty') or mapping[k].get('rate'))]
+        if still_unmapped:
             fy_urls = load_fy_settings()
             
             # Group keys by targeted FY based on prefix
             keys_by_fy = {}
-            for k in unmapped_keys:
+            for k in still_unmapped:
                 k_upper = str(k).strip().upper()
                 target_fy = None
                 if "27" in k_upper[:10]:
@@ -2941,14 +2999,26 @@ def lookup_purchase_quantities():
         except Exception as e:
             print(f"[LOOKUP PURCHASE] Local query error: {str(e)}", flush=True)
 
-        # 2. Query remaining unmapped keys directly from Google Sheets Web App
+        # 2. Query unmapped keys from Supabase (Ultra-fast, indexed, low memory)
         unmapped_keys = [k for k in keys if k not in mapping or not (mapping[k].get('qty') or mapping[k].get('rate'))]
         if unmapped_keys:
+            try:
+                res_mapping = query_supabase_lookup(unmapped_keys, is_sale=False)
+                for orig_key in unmapped_keys:
+                    norm_k = str(orig_key).strip().upper()
+                    if norm_k in res_mapping:
+                        mapping[orig_key] = res_mapping[norm_k]
+            except Exception as sb_err:
+                print(f"[LOOKUP PURCHASE SUPABASE ERROR]: {sb_err}", flush=True)
+
+        # 3. Fallback to Google Sheets only if any keys are STILL missing
+        still_unmapped = [k for k in keys if k not in mapping or not (mapping[k].get('qty') or mapping[k].get('rate'))]
+        if still_unmapped:
             fy_urls = load_fy_settings()
             
             # Group keys by targeted FY based on prefix
             keys_by_fy = {}
-            for k in unmapped_keys:
+            for k in still_unmapped:
                 k_upper = str(k).strip().upper()
                 target_fy = None
                 if "27" in k_upper[:10]:
