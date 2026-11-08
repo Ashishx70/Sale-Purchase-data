@@ -550,7 +550,7 @@ function writeDataToSheet(sheetName, saleRows, purchaseRows, isAppend) {
     } catch(e) {}
     
     // Auto-sync newly written rows to Supabase Cloud Database (Zero RAM on Render)
-    syncRowsToSupabase(sheetName, saleRows, purchaseRows);
+    // syncRowsToSupabase(sheetName, saleRows, purchaseRows); // Auto-sync to Supabase turned off (manual sync only)
     
     return {
       success: true,
@@ -668,7 +668,7 @@ function appendBatch(sheetName, saleRows, purchaseRows, batchIndex, totalBatches
     }
     
     // Auto-sync appended batch rows to Supabase Cloud Database (Zero RAM on Render)
-    syncRowsToSupabase(sheetName, saleRows, purchaseRows);
+    // syncRowsToSupabase(sheetName, saleRows, purchaseRows); // Auto-sync to Supabase turned off (manual sync only)
     
     return {
       success: true,

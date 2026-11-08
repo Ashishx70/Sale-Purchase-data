@@ -4747,52 +4747,7 @@ def direct_sync_chunk():
         
         res = sync_batch_direct_api(sid, sheet_name, sale_rows_2d, purchase_rows_2d, sale_start_row, purchase_start_row)
         
-        # Async background sync to Supabase cache tables
-        def push_supabase_cache(s_rows, p_rows, s_name):
-            try:
-                if s_rows:
-                    payload = []
-                    for sr in s_rows:
-                        k = str(sr.get('sale_unique_id') or '').strip().upper()
-                        if not k: continue
-                        payload.append({
-                            'key': k,
-                            'seller_name': str(sr.get('warehouse_name') or '').strip(),
-                            'qty': float(sr.get('calc_qty') or sr.get('quantity') or 0.0),
-                            'rate': float(sr.get('calc_cost') or sr.get('item_cost') or 0.0),
-                            'state': str(sr.get('state_code_short') or '').strip(),
-                            'sheet_name': s_name
-                        })
-                    for b in range(0, len(payload), 1000):
-                        requests.post(
-                            f"{SUPABASE_URL}/rest/v1/sale_cache",
-                            headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}', 'Prefer': 'resolution=merge-duplicates'},
-                            json=payload[b:b+1000],
-                            timeout=30
-                        )
-                if p_rows:
-                    p_payload = []
-                    for pr in p_rows:
-                        pk = str(pr.get('purchase_unique_id') or '').strip().upper()
-                        if not pk: continue
-                        p_payload.append({
-                            'key': pk,
-                            'seller_name': str(pr.get('warehouse_name') or '').strip(),
-                            'qty': float(pr.get('calc_qty') or pr.get('quantity') or 0.0),
-                            'rate': float(pr.get('calc_cost') or pr.get('item_cost') or 0.0),
-                            'sheet_name': s_name
-                        })
-                    for pb in range(0, len(p_payload), 1000):
-                        requests.post(
-                            f"{SUPABASE_URL}/rest/v1/purchase_cache",
-                            headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}', 'Prefer': 'resolution=merge-duplicates'},
-                            json=p_payload[pb:pb+1000],
-                            timeout=30
-                        )
-            except Exception as sb_err:
-                print(f"[DIRECT SYNC] Supabase async sync notice: {sb_err}", flush=True)
-                
-        Thread(target=push_supabase_cache, args=(sale_rows, purchase_rows, sheet_name), daemon=True).start()
+        # Note: Auto-sync to Supabase is turned off as per user preference (manual sync only via Cache Manager)
         
         del sale_rows, purchase_rows, sale_rows_2d, purchase_rows_2d
         gc.collect()
