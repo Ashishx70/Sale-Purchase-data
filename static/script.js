@@ -2542,9 +2542,9 @@ async function startSyncToGoogleSheets() {
 
         
 
-        // Check if Ultra-Fast Direct Google Sheets API v4 is active
+        // Ultra-Fast Direct Google Sheets API v4 Sync (5,000 rows/batch)
         const isDirect = !!syncData.directSync;
-        const chunkSize = isDirect ? 5000 : 1000;
+        const chunkSize = 5000;
         const totalBatches = Math.ceil(maxRows / chunkSize);
         
         let currentSaleStartRow = 3;
@@ -2581,61 +2581,75 @@ async function startSyncToGoogleSheets() {
             showGlobalLoader(batchTitle, batchMsg);
             if (progFill) progFill.style.width = percent + '%';
 
-            if (isDirect) {
-                const res = await safeFetchJson('/api/direct-sync-chunk', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sheetName,
-                        mode,
-                        offset: startIdx,
-                        limit: chunkSize,
-                        saleStartRow: currentSaleStartRow,
-                        purchaseStartRow: currentPurchaseStartRow,
+            // Print live ticker in browser console every second with exact timestamp
+            const initialTime = new Date().toLocaleTimeString();
+            console.log(`[${initialTime}] Updating data to database... (Batch ${i}/${totalBatches} | Remaining: ${remaining})`);
+
+            const liveTimer = setInterval(() => {
+                const now = new Date().toLocaleTimeString();
+                console.log(`[${now}] Updating data to database... (Batch ${i}/${totalBatches} | Remaining: ${remaining})`);
+                showGlobalLoader(batchTitle, `[${now}] Updating data to database... (Batch ${i}/${totalBatches} | Remaining: ${remaining})`);
+            }, 1000);
+
+            try {
+                if (isDirect) {
+                    const res = await safeFetchJson('/api/direct-sync-chunk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sheetName,
+                            mode,
+                            offset: startIdx,
+                            limit: chunkSize,
+                            saleStartRow: currentSaleStartRow,
+                            purchaseStartRow: currentPurchaseStartRow,
+                            batchIndex: i,
+                            totalBatches: totalBatches
+                        })
+                    });
+                    if (!res.ok || !res.data || !res.data.success) {
+                        throw new Error(res.data?.error || `Direct API Batch ${i} failed`);
+                    }
+                    currentSaleStartRow = res.data.nextSaleStartRow;
+                    currentPurchaseStartRow = res.data.nextPurchaseStartRow;
+                } else {
+                    // Fallback to Google Apps Script Web App
+                    const { ok: okChunk, data: chunkData } = await safeFetchJson(`/api/get-sync-chunk?offset=${startIdx}&limit=${chunkSize}`);
+                    if (!okChunk || chunkData.error) throw new Error(chunkData.error || `Failed to load batch ${i}`);
+
+                    const saleChunk = chunkData.saleRows || [];
+                    const purchaseChunk = chunkData.purchaseRows || [];
+
+                    const actionType = (mode === 'overwrite' && i === 1) ? 'writeData' : 'appendBatch';
+                    const payload = {
+                        action: actionType,
+                        sheetName: sheetName,
+                        saleRows: saleChunk,
+                        purchaseRows: purchaseChunk,
+                        isAppend: !(mode === 'overwrite' && i === 1),
                         batchIndex: i,
                         totalBatches: totalBatches
-                    })
-                });
-                if (!res.ok || !res.data || !res.data.success) {
-                    throw new Error(res.data?.error || `Direct API Batch ${i} failed`);
+                    };
+
+                    const res = await safeFetchJson('/api/send-sync-chunk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            webAppUrl: activeUrl,
+                            payload: payload
+                        })
+                    });
+
+                    if (!res.ok || !res.data || !res.data.success) {
+                        throw new Error(res.data?.error || `Batch ${i} failed`);
+                    }
                 }
-                currentSaleStartRow = res.data.nextSaleStartRow;
-                currentPurchaseStartRow = res.data.nextPurchaseStartRow;
-            } else {
-                // Fallback to Google Apps Script Web App
-                const { ok: okChunk, data: chunkData } = await safeFetchJson(`/api/get-sync-chunk?offset=${startIdx}&limit=${chunkSize}`);
-                if (!okChunk || chunkData.error) throw new Error(chunkData.error || `Failed to load batch ${i}`);
-
-                const saleChunk = chunkData.saleRows || [];
-                const purchaseChunk = chunkData.purchaseRows || [];
-
-                const actionType = (mode === 'overwrite' && i === 1) ? 'writeData' : 'appendBatch';
-                const payload = {
-                    action: actionType,
-                    sheetName: sheetName,
-                    saleRows: saleChunk,
-                    purchaseRows: purchaseChunk,
-                    isAppend: !(mode === 'overwrite' && i === 1),
-                    batchIndex: i,
-                    totalBatches: totalBatches
-                };
-
-                let okSend = false, resJSON = null;
-                const res = await safeFetchJson('/api/send-sync-chunk', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        webAppUrl: activeUrl,
-                        payload: payload
-                    })
-                });
-                okSend = res.ok;
-                resJSON = res.data;
-
-                if (!okSend || !resJSON.success) {
-                    throw new Error(resJSON.error || `Batch ${i} failed`);
-                }
+            } finally {
+                clearInterval(liveTimer);
             }
+
+            const doneTime = new Date().toLocaleTimeString();
+            console.log(`[${doneTime}] Updating data to database... (Batch ${i}/${totalBatches} done | Remaining: ${remaining})`);
         }
 
         
