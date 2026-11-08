@@ -2701,6 +2701,310 @@ _ENC_KEY = "c2Jfc2VjcmV0X05LRUt1SEtrRnRBQnlHZWJRTmFvUUFfVE5waklMNGg="
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://zjxaottgkumhydhsylor.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", base64.b64decode(_ENC_KEY).decode('utf-8'))
 
+CACHE_SESSION_FILE = os.path.join(DATA_DIR, 'supabase_session.json')
+CACHE_TTL_SECONDS = 5 * 3600  # 5 Hours Working Cache TTL
+
+_supabase_sync_status = {
+    "status": "idle",
+    "message": "Ready",
+    "percent": 0,
+    "sale_synced": 0,
+    "purchase_synced": 0
+}
+
+def get_supabase_session():
+    data = {"synced_at": 0, "active_sheets": []}
+    if os.path.exists(CACHE_SESSION_FILE):
+        try:
+            with open(CACHE_SESSION_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            pass
+    return data
+
+def save_supabase_session(data):
+    try:
+        with open(CACHE_SESSION_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"[CACHE SESSION ERROR]: {e}", flush=True)
+
+def nill_supabase_tables():
+    """Deletes all rows in sale_cache and purchase_cache, resetting Supabase database to 0 (Nill)."""
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+    try:
+        requests.delete(f"{SUPABASE_URL}/rest/v1/sale_cache?key=not.is.null", headers=headers, timeout=30)
+        requests.delete(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.is.null", headers=headers, timeout=30)
+        save_supabase_session({"synced_at": 0, "active_sheets": []})
+        print("[SUPABASE NILL] Successfully wiped all cache tables to 0 rows.", flush=True)
+        return True
+    except Exception as e:
+        print(f"[NILL SUPABASE ERROR]: {e}", flush=True)
+        return False
+
+def get_supabase_live_counts():
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Range": "0-0",
+        "Prefer": "count=exact"
+    }
+    sale_count = 0
+    purchase_count = 0
+    try:
+        r_s = requests.get(f"{SUPABASE_URL}/rest/v1/sale_cache?select=key", headers=headers, timeout=10)
+        rng_s = r_s.headers.get("content-range", "")
+        if "/" in rng_s:
+            try:
+                sale_count = int(rng_s.split("/")[-1])
+            except ValueError:
+                sale_count = 0
+        r_p = requests.get(f"{SUPABASE_URL}/rest/v1/purchase_cache?select=key", headers=headers, timeout=10)
+        rng_p = r_p.headers.get("content-range", "")
+        if "/" in rng_p:
+            try:
+                purchase_count = int(rng_p.split("/")[-1])
+            except ValueError:
+                purchase_count = 0
+    except Exception as e:
+        print(f"[COUNT ERROR]: {e}", flush=True)
+    return sale_count, purchase_count
+
+def sync_selected_sheets_worker(selected_sheets, clear_first=True):
+    global _supabase_sync_status
+    import csv, io, urllib.parse
+    
+    _supabase_sync_status = {
+        "status": "running",
+        "message": "Initializing sync...",
+        "percent": 5,
+        "sale_synced": 0,
+        "purchase_synced": 0
+    }
+    
+    if clear_first:
+        _supabase_sync_status["message"] = "Clearing previous database (Nill)..."
+        nill_supabase_tables()
+        
+    headers_supa = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+    }
+    
+    total_sale_all = 0
+    total_purchase_all = 0
+    
+    for s_idx, target in enumerate(selected_sheets):
+        _supabase_sync_status["message"] = f"Fetching Google Sheet data for '{target}'..."
+        _supabase_sync_status["percent"] = int(10 + (s_idx / max(1, len(selected_sheets))) * 80)
+        
+        meta = get_gviz_metadata(target)
+        if not meta:
+            continue
+            
+        ss_id = meta.get("spreadsheet_id")
+        gid = meta.get("gid", "0")
+        
+        # 1. Fetch Sales
+        try:
+            q_sale = urllib.parse.quote("SELECT E, AA, AB, AC, AL")
+            gviz_url_sale = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_sale}"
+            r_sale = requests.get(gviz_url_sale, timeout=120)
+            if r_sale.status_code == 200:
+                reader = csv.reader(io.StringIO(r_sale.text))
+                rows = list(reader)
+                if len(rows) > 1:
+                    batch = []
+                    seen = set()
+                    for r in rows[1:]:
+                        if len(r) < 5: continue
+                        k = str(r[1]).strip().upper()
+                        if not k or k in seen: continue
+                        seen.add(k)
+                        try:
+                            qty = float(str(r[2]).replace(',', '').strip()) if r[2] else 0.0
+                        except ValueError: qty = 0.0
+                        try:
+                            rate = float(str(r[3]).replace(',', '').strip()) if r[3] else 0.0
+                        except ValueError: rate = 0.0
+                        batch.append({
+                            "key": k,
+                            "seller_name": str(r[0]).strip()[:150],
+                            "qty": qty,
+                            "rate": rate,
+                            "state": str(r[4]).strip()[:50],
+                            "sheet_name": target
+                        })
+                        if len(batch) >= 1000:
+                            requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
+                            total_sale_all += len(batch)
+                            _supabase_sync_status["sale_synced"] = total_sale_all
+                            batch = []
+                    if batch:
+                        requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
+                        total_sale_all += len(batch)
+                        _supabase_sync_status["sale_synced"] = total_sale_all
+        except Exception as err:
+            print(f"[SYNC SALE ERROR] {target}: {err}", flush=True)
+
+        # 2. Fetch Purchases
+        try:
+            q_purch = urllib.parse.quote("SELECT AP, BH, BI, BJ WHERE BH IS NOT NULL")
+            gviz_url_purch = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_purch}"
+            r_purch = requests.get(gviz_url_purch, timeout=120)
+            if r_purch.status_code == 200:
+                reader = csv.reader(io.StringIO(r_purch.text))
+                p_rows = list(reader)
+                if len(p_rows) > 1:
+                    p_batch = []
+                    p_seen = set()
+                    for pr in p_rows[1:]:
+                        if len(pr) < 4: continue
+                        pk = str(pr[1]).strip().upper()
+                        if not pk or pk in p_seen: continue
+                        p_seen.add(pk)
+                        try:
+                            pqty = float(str(pr[2]).replace(',', '').strip()) if pr[2] else 0.0
+                        except ValueError: pqty = 0.0
+                        try:
+                            prate = float(str(pr[3]).replace(',', '').strip()) if pr[3] else 0.0
+                        except ValueError: prate = 0.0
+                        p_batch.append({
+                            "key": pk,
+                            "seller_name": str(pr[0]).strip()[:150],
+                            "qty": pqty,
+                            "rate": prate,
+                            "sheet_name": target
+                        })
+                        if len(p_batch) >= 1000:
+                            requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
+                            total_purchase_all += len(p_batch)
+                            _supabase_sync_status["purchase_synced"] = total_purchase_all
+                            p_batch = []
+                    if p_batch:
+                        requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
+                        total_purchase_all += len(p_batch)
+                        _supabase_sync_status["purchase_synced"] = total_purchase_all
+        except Exception as p_err:
+            print(f"[SYNC PURCH ERROR] {target}: {p_err}", flush=True)
+
+    save_supabase_session({
+        "synced_at": time.time(),
+        "active_sheets": selected_sheets
+    })
+    
+    _supabase_sync_status = {
+        "status": "success",
+        "message": f"Successfully loaded {total_sale_all:,} sale & {total_purchase_all:,} purchase records!",
+        "percent": 100,
+        "sale_synced": total_sale_all,
+        "purchase_synced": total_purchase_all
+    }
+
+@app.route('/api/supabase-cache-status', methods=['GET', 'OPTIONS'])
+def supabase_cache_status():
+    if request.method == 'OPTIONS':
+        res = jsonify({"status": "Success"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        res.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        res.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return res
+        
+    urls, sheet_urls = load_fy_all_settings()
+    available_sheets = list(urls.keys())
+    session = get_supabase_session()
+    synced_at = session.get("synced_at", 0)
+    now = time.time()
+    
+    is_expired = False
+    expires_in = 0
+    if synced_at > 0:
+        elapsed = now - synced_at
+        if elapsed > CACHE_TTL_SECONDS:
+            is_expired = True
+            nill_supabase_tables()
+            synced_at = 0
+        else:
+            expires_in = int(CACHE_TTL_SECONDS - elapsed)
+            
+    sale_count, purchase_count = get_supabase_live_counts()
+    
+    res_data = {
+        "status": "Success",
+        "available_sheets": available_sheets,
+        "active_sheets": session.get("active_sheets", []) if not is_expired else [],
+        "sale_count": sale_count,
+        "purchase_count": purchase_count,
+        "synced_at": synced_at,
+        "expires_in_seconds": expires_in,
+        "is_expired": is_expired,
+        "ttl_hours": 5
+    }
+    resp = jsonify(res_data)
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp
+
+@app.route('/api/nill-supabase-cache', methods=['POST', 'OPTIONS'])
+def nill_supabase_cache():
+    if request.method == 'OPTIONS':
+        res = jsonify({"status": "Success"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        res.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        res.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return res
+        
+    ok = nill_supabase_tables()
+    resp = jsonify({
+        "status": "Success" if ok else "Error",
+        "message": "Database cache successfully cleared (Nill)!" if ok else "Failed to clear database"
+    })
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp
+
+@app.route('/api/sync-supabase-cache', methods=['POST', 'OPTIONS'])
+def sync_supabase_cache():
+    if request.method == 'OPTIONS':
+        res = jsonify({"status": "Success"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        res.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        res.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return res
+        
+    req_data = request.get_json(force=True, silent=True) or {}
+    selected_sheets = req_data.get("sheets", [])
+    clear_first = req_data.get("clear_first", True)
+    
+    if not selected_sheets:
+        resp = jsonify({"status": "Error", "message": "No sheets selected"})
+        resp.headers.add("Access-Control-Allow-Origin", "*")
+        return resp, 400
+        
+    threading.Thread(target=sync_selected_sheets_worker, args=(selected_sheets, clear_first)).start()
+    
+    resp = jsonify({
+        "status": "Success",
+        "message": f"Sync started for sheets: {', '.join(selected_sheets)}"
+    })
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp
+
+@app.route('/api/supabase-sync-progress', methods=['GET', 'OPTIONS'])
+def supabase_sync_progress():
+    if request.method == 'OPTIONS':
+        res = jsonify({"status": "Success"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        res.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        res.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return res
+    resp = jsonify(_supabase_sync_status)
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp
+
 def query_supabase_lookup(keys, is_sale=True):
     """Query keys from Supabase PostgreSQL cache in ultra-fast batches (10-30ms, ~0MB RAM)."""
     if not keys:

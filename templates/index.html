@@ -32,6 +32,9 @@
             <button class="btn btn-sm" onclick="openSettingsModal()" style="display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg,#6366f1,#818cf8); color:#ffffff; font-weight:600; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; margin-left:16px; box-shadow:0 2px 8px rgba(99,102,241,0.25);">
                 ⚙️ Sheet Settings
             </button>
+            <button class="btn btn-sm" onclick="openSupabaseModal()" style="display:inline-flex; align-items:center; gap:6px; background:linear-gradient(135deg,#059669,#10b981); color:#ffffff; font-weight:600; border:none; padding:6px 14px; border-radius:6px; cursor:pointer; margin-left:8px; box-shadow:0 2px 8px rgba(16,185,129,0.25);">
+                ⚡ Supabase Cache (Live / Nill)
+            </button>
         </div>
 
         <div style="display:flex; align-items:center; gap:12px; margin-left:auto;">
@@ -445,6 +448,227 @@
             </div>
         </div>
     </div>
+
+    <!-- Supabase Working Cache Manager Modal -->
+    <div id="supabase-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-card" style="width: 520px; border-radius: var(--radius-lg); padding: 26px; box-shadow: var(--shadow-lg); background: #ffffff;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; border-bottom: 1px solid var(--border-glass, #e2e8f0); padding-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.4rem;">⚡</span>
+                    <div>
+                        <h3 style="margin: 0; color: var(--text-primary); font-size: 1.15rem; font-weight: 700;">Supabase Cache Manager</h3>
+                        <p style="margin: 2px 0 0; font-size: 0.78rem; color: var(--text-secondary);">5-Hour On-Demand Working Session Cache</p>
+                    </div>
+                </div>
+                <button onclick="closeSupabaseModal()" style="background:none; border:none; font-size:1.4rem; cursor:pointer; color:var(--text-muted);">&times;</button>
+            </div>
+
+            <!-- Live Status Banner -->
+            <div id="sb-status-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <span style="font-size: 0.8rem; font-weight: 700; color: #475569; text-transform: uppercase;">Cache Status</span>
+                    <span id="sb-status-badge" style="font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; background: #fee2e2; color: #dc2626;">Checking...</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem;">
+                    <div>Sale Keys: <strong id="sb-sale-count">0</strong></div>
+                    <div>Purchase Keys: <strong id="sb-purchase-count">0</strong></div>
+                    <div style="grid-column: span 2;">Active Sheets: <strong id="sb-active-sheets">None (Nill)</strong></div>
+                    <div style="grid-column: span 2; color: #6366f1;">⏱️ Session Remaining: <strong id="sb-timer-left">--</strong></div>
+                </div>
+            </div>
+
+            <!-- Sheet Selection -->
+            <div style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label style="font-size: 0.82rem; font-weight: 700; color: #334155;">
+                        Select Sheets To Send Into Database:
+                    </label>
+                    <button type="button" onclick="selectAllSBSheets(true)" style="background:none; border:none; font-size:0.75rem; color:#2563eb; cursor:pointer; font-weight:600;">Select All</button>
+                </div>
+                <div id="sb-sheets-checklist" style="max-height: 160px; overflow-y: auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                    <span style="font-size: 0.82rem; color: #94a3b8;">Loading available sheets...</span>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div id="sb-progress-wrap" style="display: none; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.78rem; font-weight: 600; margin-bottom: 4px; color: #059669;">
+                    <span id="sb-progress-msg">Syncing...</span>
+                    <span id="sb-progress-pct">0%</span>
+                </div>
+                <div style="height: 6px; background: #e2e8f0; border-radius: 6px; overflow: hidden;">
+                    <div id="sb-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #10b981, #059669); transition: width 0.3s;"></div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 10px; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+                <button type="button" class="btn btn-sm" onclick="nillSupabaseCache()" style="background: #ef4444; color: #fff; border: none; padding: 9px 14px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                    🗑️ Nill Database (0 Rows)
+                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeSupabaseModal()">Close</button>
+                    <button type="button" id="sb-sync-btn" class="btn btn-primary btn-sm" onclick="startSupabaseSync()" style="background: #10b981; border: none; font-weight: 700; padding: 9px 16px; border-radius: 6px; color:#fff; cursor:pointer;">
+                        🚀 Send Selected Sheets
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openSupabaseModal() {
+            const overlay = document.getElementById('supabase-modal-overlay');
+            if (overlay) overlay.classList.remove('hidden');
+            loadSupabaseStatus();
+        }
+
+        function closeSupabaseModal() {
+            const overlay = document.getElementById('supabase-modal-overlay');
+            if (overlay) overlay.classList.add('hidden');
+        }
+
+        function selectAllSBSheets(val) {
+            document.querySelectorAll('.sb-sheet-checkbox').forEach(cb => cb.checked = val);
+        }
+
+        async function loadSupabaseStatus() {
+            const badge = document.getElementById('sb-status-badge');
+            const saleEl = document.getElementById('sb-sale-count');
+            const purchEl = document.getElementById('sb-purchase-count');
+            const actEl = document.getElementById('sb-active-sheets');
+            const timerEl = document.getElementById('sb-timer-left');
+            const checkList = document.getElementById('sb-sheets-checklist');
+
+            try {
+                const res = await fetch('/api/supabase-cache-status');
+                const data = await res.json();
+                if (data.status === 'Success') {
+                    saleEl.textContent = (data.sale_count || 0).toLocaleString();
+                    purchEl.textContent = (data.purchase_count || 0).toLocaleString();
+                    
+                    if (data.sale_count > 0 && !data.is_expired) {
+                        badge.textContent = 'Active (Live)';
+                        badge.style.background = '#dcfce7';
+                        badge.style.color = '#15803d';
+                        actEl.textContent = data.active_sheets.length ? data.active_sheets.join(', ') : 'All Loaded';
+                        
+                        const mins = Math.floor((data.expires_in_seconds || 0) / 60);
+                        const hrs = Math.floor(mins / 60);
+                        const remMins = mins % 60;
+                        timerEl.textContent = `${hrs}h ${remMins}m remaining (Auto-Expires)`;
+                        timerEl.style.color = '#059669';
+                    } else {
+                        badge.textContent = 'Nill (Empty)';
+                        badge.style.background = '#fee2e2';
+                        badge.style.color = '#dc2626';
+                        actEl.textContent = 'None (Database Clean)';
+                        timerEl.textContent = 'Expired / Cleared';
+                        timerEl.style.color = '#dc2626';
+                    }
+
+                    // Populate checkboxes
+                    checkList.innerHTML = '';
+                    const available = data.available_sheets || ['2026-27', '2025-26'];
+                    available.forEach(s => {
+                        const isChecked = data.active_sheets.includes(s) || (data.active_sheets.length === 0 && s.includes('27'));
+                        const row = document.createElement('label');
+                        row.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:0.85rem; cursor:pointer; padding:3px 0;';
+                        row.innerHTML = `<input type="checkbox" class="sb-sheet-checkbox" value="${s}" ${isChecked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:#10b981;"> <span>Sheet: <strong>${s}</strong></span>`;
+                        checkList.appendChild(row);
+                    });
+                }
+            } catch (err) {
+                console.error("Error loading Supabase status:", err);
+            }
+        }
+
+        async function nillSupabaseCache() {
+            if (!confirm("Are you sure you want to completely NILL (empty) the Supabase cache?")) return;
+            const badge = document.getElementById('sb-status-badge');
+            badge.textContent = "Clearing...";
+            try {
+                const res = await fetch('/api/nill-supabase-cache', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || "Database cleared successfully!");
+                loadSupabaseStatus();
+            } catch (err) {
+                alert("Failed to clear database: " + err.message);
+            }
+        }
+
+        let _sbPollTimer = null;
+        async function startSupabaseSync() {
+            const checkedBoxes = Array.from(document.querySelectorAll('.sb-sheet-checkbox:checked')).map(cb => cb.value);
+            if (!checkedBoxes.length) {
+                alert("Please select at least one sheet to send!");
+                return;
+            }
+
+            const syncBtn = document.getElementById('sb-sync-btn');
+            const pWrap = document.getElementById('sb-progress-wrap');
+            const pBar = document.getElementById('sb-progress-bar');
+            const pMsg = document.getElementById('sb-progress-msg');
+            const pPct = document.getElementById('sb-progress-pct');
+
+            syncBtn.disabled = true;
+            syncBtn.style.opacity = '0.6';
+            pWrap.style.display = 'block';
+            pBar.style.width = '10%';
+            pMsg.textContent = "Connecting...";
+            pPct.textContent = "10%";
+
+            try {
+                const res = await fetch('/api/sync-supabase-cache', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sheets: checkedBoxes, clear_first: true })
+                });
+                const data = await res.json();
+                if (data.status !== 'Success') {
+                    alert("Error: " + data.message);
+                    syncBtn.disabled = false;
+                    syncBtn.style.opacity = '1';
+                    pWrap.style.display = 'none';
+                    return;
+                }
+
+                // Poll progress
+                if (_sbPollTimer) clearInterval(_sbPollTimer);
+                _sbPollTimer = setInterval(async () => {
+                    try {
+                        const pRes = await fetch('/api/supabase-sync-progress');
+                        const pData = await pRes.json();
+                        pMsg.textContent = pData.message || "Syncing...";
+                        pPct.textContent = (pData.percent || 10) + "%";
+                        pBar.style.width = (pData.percent || 10) + "%";
+
+                        if (pData.status === 'success') {
+                            clearInterval(_sbPollTimer);
+                            syncBtn.disabled = false;
+                            syncBtn.style.opacity = '1';
+                            pWrap.style.display = 'none';
+                            alert(pData.message || "Sync completed successfully!");
+                            loadSupabaseStatus();
+                        } else if (pData.status === 'error') {
+                            clearInterval(_sbPollTimer);
+                            syncBtn.disabled = false;
+                            syncBtn.style.opacity = '1';
+                            alert("Sync failed: " + pData.message);
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }, 1500);
+
+            } catch (err) {
+                alert("Sync error: " + err.message);
+                syncBtn.disabled = false;
+                syncBtn.style.opacity = '1';
+                pWrap.style.display = 'none';
+            }
+        }
+    </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="/static/script.js?v=1.0.7"></script>
