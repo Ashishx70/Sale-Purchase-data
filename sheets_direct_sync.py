@@ -50,11 +50,20 @@ def get_service_account_info_cached():
     # 1. Render Encrypted Environment Variable (Best Security Standard)
     env_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
     if env_json and env_json.strip():
+        raw = env_json.strip()
+        # Handle accidental wrapping in single or double quotes
+        if (raw.startswith("'") and raw.endswith("'")) or (raw.startswith('"') and raw.endswith('"')):
+            raw = raw[1:-1].strip()
         try:
-            _cached_key_info = json.loads(env_json.strip())
+            _cached_key_info = json.loads(raw)
             return _cached_key_info
-        except Exception as e:
-            print(f"[DIRECT SYNC] Error parsing GOOGLE_SERVICE_ACCOUNT_JSON from env: {e}", flush=True)
+        except Exception:
+            try:
+                dec = base64.b64decode(raw).decode('utf-8')
+                _cached_key_info = json.loads(dec)
+                return _cached_key_info
+            except Exception as e:
+                print(f"[DIRECT SYNC] Error parsing GOOGLE_SERVICE_ACCOUNT_JSON from env: {e}", flush=True)
 
     # 2. Local disk file (for local machine development)
     p = get_service_account_path()

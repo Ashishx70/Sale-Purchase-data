@@ -2840,14 +2840,14 @@ def get_supabase_live_counts():
     sale_count = 0
     purchase_count = 0
     try:
-        r_s = requests.get(f"{SUPABASE_URL}/rest/v1/sale_cache?key=not.like.__%25&select=key", headers=headers, timeout=10)
+        r_s = requests.get(f"{SUPABASE_URL}/rest/v1/sale_cache?key=not.in.(__CACHE_SESSION__,__FY_SETTINGS__,__SYS_GSA__)&select=key", headers=headers, timeout=10)
         rng_s = r_s.headers.get("content-range", "")
         if "/" in rng_s:
             try:
                 sale_count = int(rng_s.split("/")[-1])
             except ValueError:
                 sale_count = 0
-        r_p = requests.get(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.like.__%25&select=key", headers=headers, timeout=10)
+        r_p = requests.get(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.in.(__CACHE_SESSION__,__FY_SETTINGS__,__SYS_GSA__)&select=key", headers=headers, timeout=10)
         rng_p = r_p.headers.get("content-range", "")
         if "/" in rng_p:
             try:
@@ -3017,31 +3017,54 @@ def supabase_cache_status():
     available_sheets = list(urls.keys())
     session = get_supabase_session()
     synced_at = session.get("synced_at", 0)
+    active_sheets = list(session.get("active_sheets", []))
     now = time.time()
     
+    sale_count, purchase_count = get_supabase_live_counts()
+
+    # If active_sheets is empty but records exist in Supabase, auto-detect sheet names from sale_cache
+    if (sale_count > 0 or purchase_count > 0) and not active_sheets:
+        try:
+            headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            r_sample = requests.get(f"{SUPABASE_URL}/rest/v1/sale_cache?key=not.in.(__CACHE_SESSION__,__FY_SETTINGS__,__SYS_GSA__)&select=sheet_name&limit=50", headers=headers, timeout=5)
+            if r_sample.status_code == 200 and r_sample.json():
+                raw_names = set(x.get('sheet_name', '') for x in r_sample.json() if x.get('sheet_name'))
+                detected = []
+                for sh in raw_names:
+                    matched = False
+                    for avail in available_sheets:
+                        if avail in sh and avail not in detected:
+                            detected.append(avail)
+                            matched = True
+                    if not matched and sh and sh not in detected:
+                        detected.append(sh)
+                if detected:
+                    active_sheets = detected
+        except Exception as e:
+            print(f"[ACTIVE SHEETS DETECT ERR]: {e}", flush=True)
+
     is_expired = False
     expires_in = 0
     if synced_at > 0:
         elapsed = now - synced_at
         if elapsed > CACHE_TTL_SECONDS:
-            is_expired = True
-            nill_supabase_tables()
-            synced_at = 0
+            is_expired = False  # Keep database intact; do NOT auto-delete user data
+            expires_in = 0
         else:
             expires_in = int(CACHE_TTL_SECONDS - elapsed)
-            
-    sale_count, purchase_count = get_supabase_live_counts()
-    
+    elif sale_count > 0 or purchase_count > 0:
+        expires_in = CACHE_TTL_SECONDS
+        
     res_data = {
         "status": "Success",
         "available_sheets": available_sheets,
-        "active_sheets": session.get("active_sheets", []) if not is_expired else [],
+        "active_sheets": active_sheets,
         "sale_count": sale_count,
         "purchase_count": purchase_count,
         "synced_at": synced_at,
         "expires_in_seconds": expires_in,
         "is_expired": is_expired,
-        "ttl_hours": 5
+        "ttl_hours": 9
     }
     resp = jsonify(res_data)
     resp.headers.add("Access-Control-Allow-Origin", "*")
