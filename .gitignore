@@ -10,3 +10,8 @@ uploads/
 local_store.db
 migrate_to_supabase.py
 
+
+# Google Cloud Service Account Keys
+*gmail-otp-reader*.json
+*service_account*.json
+credentials*.json

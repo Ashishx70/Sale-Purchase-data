@@ -4354,36 +4354,54 @@ def prepare_sync():
         sheet_sale_count = 0
         sheet_purchase_count = 0
         
+        is_direct = False
         if mode == 'append':
             try:
-                # Call getExistingUniqueIds from Google Sheets Web App once
-                from urllib.parse import quote
-                url = f"{web_app_url}?action=getExistingUniqueIds&sheetName={quote(sheet_name)}"
-                res = requests.get(url, allow_redirects=False, timeout=120)
-                if res.status_code in [302, 307, 308]:
-                    redirect_url = res.headers.get('Location')
-                    res = requests.get(redirect_url, timeout=120)
-                
-                if res.status_code == 200:
-                    res_data = res.json()
-                    if res_data.get('success'):
-                        existing_sale_ids = set(str(uid) for uid in res_data.get('saleIds', []))
-                        existing_purchase_ids = set(str(uid) for uid in res_data.get('purchaseIds', []))
-                        sheet_sale_count = int(res_data.get('saleCount', len(existing_sale_ids)))
-                        sheet_purchase_count = int(res_data.get('purchaseCount', len(existing_purchase_ids)))
-            except Exception as e:
-                print(f"Error fetching unique IDs from sheet: {str(e)}", flush=True)
-                # Fallback: check SQLite cache
+                from sheets_direct_sync import is_direct_sync_available, get_spreadsheet_id_for_target, get_existing_unique_ids_fast
+                if is_direct_sync_available():
+                    sid = get_spreadsheet_id_for_target(sheet_name, web_app_url)
+                    if sid:
+                        print(f"[DIRECT SYNC] Fetching existing unique IDs via Google Sheets API v4 (SID: {sid})...", flush=True)
+                        ids_data = get_existing_unique_ids_fast(sid, sheet_name)
+                        existing_sale_ids = ids_data['sale_ids']
+                        existing_purchase_ids = ids_data['purchase_ids']
+                        sheet_sale_count = ids_data['sale_count']
+                        sheet_purchase_count = ids_data['purchase_count']
+                        is_direct = True
+                        print(f"[DIRECT SYNC] Fast IDs fetch complete: {len(existing_sale_ids)} sales, {len(existing_purchase_ids)} purchases.", flush=True)
+            except Exception as dir_err:
+                print(f"[DIRECT SYNC] Note on fast unique IDs fetch: {dir_err}", flush=True)
+
+            if not is_direct:
                 try:
-                    cache_conn = sqlite3.connect(_CACHE_DB_PATH)
-                    cache_cursor = cache_conn.cursor()
-                    cache_cursor.execute("SELECT key FROM sale_cache WHERE sheet_name = ?", (sheet_name,))
-                    existing_sale_ids = {str(r[0]) for r in cache_cursor.fetchall()}
-                    cache_cursor.execute("SELECT key FROM purchase_cache WHERE sheet_name = ?", (sheet_name,))
-                    existing_purchase_ids = {str(r[0]) for r in cache_cursor.fetchall()}
-                    cache_conn.close()
-                except Exception as cache_err:
-                    print(f"Fallback cache query failed: {str(cache_err)}", flush=True)
+                    # Fallback to Google Sheets Web App
+                    from urllib.parse import quote
+                    url = f"{web_app_url}?action=getExistingUniqueIds&sheetName={quote(sheet_name)}"
+                    res = requests.get(url, allow_redirects=False, timeout=120)
+                    if res.status_code in [302, 307, 308]:
+                        redirect_url = res.headers.get('Location')
+                        res = requests.get(redirect_url, timeout=120)
+                    
+                    if res.status_code == 200:
+                        res_data = res.json()
+                        if res_data.get('success'):
+                            existing_sale_ids = set(str(uid) for uid in res_data.get('saleIds', []))
+                            existing_purchase_ids = set(str(uid) for uid in res_data.get('purchaseIds', []))
+                            sheet_sale_count = int(res_data.get('saleCount', len(existing_sale_ids)))
+                            sheet_purchase_count = int(res_data.get('purchaseCount', len(existing_purchase_ids)))
+                except Exception as e:
+                    print(f"Error fetching unique IDs from sheet: {str(e)}", flush=True)
+                    # Fallback: check SQLite cache
+                    try:
+                        cache_conn = sqlite3.connect(_CACHE_DB_PATH)
+                        cache_cursor = cache_conn.cursor()
+                        cache_cursor.execute("SELECT key FROM sale_cache WHERE sheet_name = ?", (sheet_name,))
+                        existing_sale_ids = {str(r[0]) for r in cache_cursor.fetchall()}
+                        cache_cursor.execute("SELECT key FROM purchase_cache WHERE sheet_name = ?", (sheet_name,))
+                        existing_purchase_ids = {str(r[0]) for r in cache_cursor.fetchall()}
+                        cache_conn.close()
+                    except Exception as cache_err:
+                        print(f"Fallback cache query failed: {str(cache_err)}", flush=True)
                     
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
@@ -4490,6 +4508,12 @@ def prepare_sync():
         gc.collect()
         
         print(f"[SYNC PREPARE SUCCESS] [OK] Ready to sync: {inserted_sale} sales, {inserted_purchase} purchases. (Skipped: {skipped_sale} sales, {skipped_purchase} purchases)", flush=True)
+        try:
+            from sheets_direct_sync import is_direct_sync_available
+            has_direct = is_direct_sync_available()
+        except Exception:
+            has_direct = False
+
         return jsonify({
             'success': True,
             'originalSale': original_sale_count,
@@ -4498,6 +4522,7 @@ def prepare_sync():
             'skippedPurchase': skipped_purchase,
             'toSyncSale': inserted_sale,
             'toSyncPurchase': inserted_purchase,
+            'directSync': has_direct
         })
     except Exception as e:
         print(f"[SYNC PREPARE ERROR] [FAIL] Exception in prepare_sync: {str(e)}", flush=True)
@@ -4624,6 +4649,160 @@ def send_sync_chunk():
         return jsonify(result)
     except Exception as e:
         print(f"[SYNC CHUNK EXCEPTION] [FAIL] {str(e)}", flush=True)
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+
+@app.route('/api/direct-sync-init', methods=['POST'])
+def direct_sync_init():
+    """Initialize sheet capacity, clear data if overwrite, and retrieve starting row indices directly."""
+    try:
+        from sheets_direct_sync import is_direct_sync_available, get_spreadsheet_id_for_target, ensure_sheet_headers_and_capacity
+        if not is_direct_sync_available():
+            return jsonify({'success': False, 'error': 'Direct sync credentials not found'}), 400
+            
+        data = request.json or {}
+        sheet_name = data.get('sheetName')
+        mode = data.get('mode', 'append')
+        to_sync_sale = int(data.get('toSyncSale', 0))
+        to_sync_purchase = int(data.get('toSyncPurchase', 0))
+        
+        sid = get_spreadsheet_id_for_target(sheet_name)
+        if not sid:
+            return jsonify({'success': False, 'error': f'Could not resolve Google Spreadsheet ID for {sheet_name}'}), 400
+            
+        res = ensure_sheet_headers_and_capacity(sid, sheet_name, mode, to_sync_sale, to_sync_purchase)
+        return jsonify({
+            'success': True,
+            'tabName': res['tab_name'],
+            'saleStartRow': res['sale_start_row'],
+            'purchaseStartRow': res['purchase_start_row']
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/direct-sync-chunk', methods=['POST'])
+def direct_sync_chunk():
+    """Ultra-fast direct sync endpoint writing 5,000+ rows directly via Google Sheets API v4."""
+    try:
+        from sheets_direct_sync import get_spreadsheet_id_for_target, sync_batch_direct_api
+        import gc
+        from threading import Thread
+
+        data = request.json or {}
+        sheet_name = data.get('sheetName')
+        offset = int(data.get('offset', 0))
+        limit = int(data.get('limit', 5000))
+        sale_start_row = int(data.get('saleStartRow', 3))
+        purchase_start_row = int(data.get('purchaseStartRow', 3))
+        batch_idx = data.get('batchIndex', 1)
+        total_batches = data.get('totalBatches', 1)
+        
+        sid = get_spreadsheet_id_for_target(sheet_name)
+        if not sid:
+            return jsonify({'success': False, 'error': 'Spreadsheet ID not found'}), 400
+            
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM sync_sale_temp ORDER BY no ASC LIMIT ? OFFSET ?", (limit, offset))
+        sale_rows = [dict(r) for r in cursor.fetchall()]
+        
+        cursor.execute("SELECT * FROM sync_purchase_temp ORDER BY no ASC LIMIT ? OFFSET ?", (limit, offset))
+        purchase_rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        
+        sale_keys = [
+            'no', 'invoice_no', 'type', 'invoice_date', 'warehouse_name',
+            'warehouse_code', 'gst_no', 'order_id', 'item_asin', 'item_sku',
+            'item_name', 'hsn_number', 'quantity', 'item_cost', 'gross',
+            'igst', 'cgst', 'sgst', 'igst_amt', 'cgst_amt', 'sgst_amt',
+            'invoice', 'reason', 'zoho_status', 'invoice_id', 'state_code',
+            'sale_unique_id', 'calc_qty', 'calc_cost', 'calc_gross',
+            'calc_igst', 'calc_cgst', 'calc_sgst', 'calc_igst_amt',
+            'calc_cgst_amt', 'calc_sgst_amt', 'calc_invoice', 'state_code_short'
+        ]
+        
+        purchase_keys = [
+            'no', 'invoice_no', 'warehouse_name', 'warehouse_code', 'gst_no',
+            'order_id', 'item_asin', 'item_sku', 'item_name', 'hsn_number',
+            'quantity', 'item_cost', 'gross', 'igst', 'cgst', 'sgst',
+            'igst_amt', 'cgst_amt', 'sgst_amt', 'invoice',
+            'purchase_unique_id', 'calc_qty', 'calc_cost', 'calc_gross',
+            'calc_igst', 'calc_cgst', 'calc_sgst', 'calc_igst_amt',
+            'calc_cgst_amt', 'calc_sgst_amt', 'calc_total_amt'
+        ]
+        
+        sale_rows_2d = [[r.get(k, '') for k in sale_keys] for r in sale_rows]
+        purchase_rows_2d = [[r.get(k, '') for k in purchase_keys] for r in purchase_rows]
+        
+        now_str = datetime.now().strftime("%I:%M:%S %p")
+        print(f"[{now_str}] [DIRECT SYNC API] Writing Batch {batch_idx}/{total_batches} ({len(sale_rows_2d)} sales, {len(purchase_rows_2d)} purchases) directly to Google Sheets API...", flush=True)
+        
+        res = sync_batch_direct_api(sid, sheet_name, sale_rows_2d, purchase_rows_2d, sale_start_row, purchase_start_row)
+        
+        # Async background sync to Supabase cache tables
+        def push_supabase_cache(s_rows, p_rows, s_name):
+            try:
+                if s_rows:
+                    payload = []
+                    for sr in s_rows:
+                        k = str(sr.get('sale_unique_id') or '').strip().upper()
+                        if not k: continue
+                        payload.append({
+                            'key': k,
+                            'seller_name': str(sr.get('warehouse_name') or '').strip(),
+                            'qty': float(sr.get('calc_qty') or sr.get('quantity') or 0.0),
+                            'rate': float(sr.get('calc_cost') or sr.get('item_cost') or 0.0),
+                            'state': str(sr.get('state_code_short') or '').strip(),
+                            'sheet_name': s_name
+                        })
+                    for b in range(0, len(payload), 1000):
+                        requests.post(
+                            f"{SUPABASE_URL}/rest/v1/sale_cache",
+                            headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}', 'Prefer': 'resolution=merge-duplicates'},
+                            json=payload[b:b+1000],
+                            timeout=30
+                        )
+                if p_rows:
+                    p_payload = []
+                    for pr in p_rows:
+                        pk = str(pr.get('purchase_unique_id') or '').strip().upper()
+                        if not pk: continue
+                        p_payload.append({
+                            'key': pk,
+                            'seller_name': str(pr.get('warehouse_name') or '').strip(),
+                            'qty': float(pr.get('calc_qty') or pr.get('quantity') or 0.0),
+                            'rate': float(pr.get('calc_cost') or pr.get('item_cost') or 0.0),
+                            'sheet_name': s_name
+                        })
+                    for pb in range(0, len(p_payload), 1000):
+                        requests.post(
+                            f"{SUPABASE_URL}/rest/v1/purchase_cache",
+                            headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}', 'Prefer': 'resolution=merge-duplicates'},
+                            json=p_payload[pb:pb+1000],
+                            timeout=30
+                        )
+            except Exception as sb_err:
+                print(f"[DIRECT SYNC] Supabase async sync notice: {sb_err}", flush=True)
+                
+        Thread(target=push_supabase_cache, args=(sale_rows, purchase_rows, sheet_name), daemon=True).start()
+        
+        del sale_rows, purchase_rows, sale_rows_2d, purchase_rows_2d
+        gc.collect()
+        
+        return jsonify({
+            'success': True,
+            'batchIndex': batch_idx,
+            'totalBatches': total_batches,
+            'nextSaleStartRow': res['nextSaleStartRow'],
+            'nextPurchaseStartRow': res['nextPurchaseStartRow']
+        })
+    except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
