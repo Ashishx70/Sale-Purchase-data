@@ -2872,6 +2872,7 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
     
     if clear_first:
         _supabase_sync_status["message"] = "Clearing previous database (Nill)..."
+        print("[SUPABASE SYNC] Clearing previous cache tables before sync...", flush=True)
         nill_supabase_tables()
         
     headers_supa = {
@@ -2884,6 +2885,7 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
     total_sale_all = 0
     total_purchase_all = 0
     num_sheets = max(1, len(selected_sheets))
+    print(f"[SUPABASE SYNC] Starting data sync to Supabase for {num_sheets} sheet(s): {selected_sheets}", flush=True)
     
     for s_idx, target in enumerate(selected_sheets):
         sheet_base_pct = int((s_idx / num_sheets) * 90)
@@ -2891,9 +2893,11 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
         
         _supabase_sync_status["message"] = f"Downloading '{target}' from Google Sheets..."
         _supabase_sync_status["percent"] = max(5, sheet_base_pct)
+        print(f"[SUPABASE SYNC] [{target}] Downloading Sales from Google Sheets...", flush=True)
         
         meta = get_gviz_metadata(target)
         if not meta:
+            print(f"[SUPABASE SYNC] [{target}] [WARN] Could not retrieve metadata, skipping.", flush=True)
             continue
             
         ss_id = meta.get("spreadsheet_id")
@@ -2937,17 +2941,20 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
                             _supabase_sync_status["percent"] = min(95, max(5, pct_now))
                             _supabase_sync_status["message"] = f"Saving '{target}' Sales: {total_sale_all:,} rows ({pct_now}%)..."
                             _supabase_sync_status["sale_synced"] = total_sale_all
+                            print(f"[SUPABASE SYNC] [{target}] Uploaded Sales batch: +{len(batch):,} rows | Total Sales: {total_sale_all:,} ({pct_now}%)", flush=True)
                             batch = []
                     if batch:
                         requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
                         total_sale_all += len(batch)
                         _supabase_sync_status["sale_synced"] = total_sale_all
+                        print(f"[SUPABASE SYNC] [{target}] Uploaded final Sales batch: +{len(batch):,} rows | Total Sales: {total_sale_all:,}", flush=True)
         except Exception as err:
             print(f"[SYNC SALE ERROR] {target}: {err}", flush=True)
 
         # 2. Fetch Purchases
         try:
             _supabase_sync_status["message"] = f"Downloading '{target}' Purchases..."
+            print(f"[SUPABASE SYNC] [{target}] Downloading Purchases from Google Sheets...", flush=True)
             q_purch = urllib.parse.quote("SELECT AP, BH, BI, BJ WHERE BH IS NOT NULL")
             gviz_url_purch = f"https://docs.google.com/spreadsheets/d/{ss_id}/gviz/tq?tqx=out:csv&gid={gid}&tq={q_purch}"
             r_purch = requests.get(gviz_url_purch, timeout=120)
@@ -2983,11 +2990,13 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
                             _supabase_sync_status["percent"] = min(98, max(5, pct_now))
                             _supabase_sync_status["message"] = f"Saving '{target}' Purchases: {total_purchase_all:,} rows ({pct_now}%)..."
                             _supabase_sync_status["purchase_synced"] = total_purchase_all
+                            print(f"[SUPABASE SYNC] [{target}] Uploaded Purchases batch: +{len(p_batch):,} rows | Total Purchases: {total_purchase_all:,} ({pct_now}%)", flush=True)
                             p_batch = []
                     if p_batch:
                         requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
                         total_purchase_all += len(p_batch)
                         _supabase_sync_status["purchase_synced"] = total_purchase_all
+                        print(f"[SUPABASE SYNC] [{target}] Uploaded final Purchases batch: +{len(p_batch):,} rows | Total Purchases: {total_purchase_all:,}", flush=True)
         except Exception as p_err:
             print(f"[SYNC PURCH ERROR] {target}: {p_err}", flush=True)
 
@@ -3003,6 +3012,7 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
         "sale_synced": total_sale_all,
         "purchase_synced": total_purchase_all
     }
+    print(f"[SUPABASE SYNC COMPLETE] Successfully uploaded {total_sale_all:,} Sales & {total_purchase_all:,} Purchases to Supabase!", flush=True)
 
 @app.route('/api/supabase-cache-status', methods=['GET', 'OPTIONS'])
 def supabase_cache_status():
