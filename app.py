@@ -2714,6 +2714,17 @@ _supabase_sync_status = {
 
 def get_supabase_session():
     data = {"synced_at": 0, "active_sheets": []}
+    try:
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        url = f"{SUPABASE_URL}/rest/v1/sale_cache?key=eq.__CACHE_SESSION__&select=seller_name"
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200 and r.json():
+            raw_meta = r.json()[0].get('seller_name', '')
+            if raw_meta:
+                return json.loads(raw_meta)
+    except Exception as e:
+        print(f"[SESSION SUPABASE READ ERR]: {e}", flush=True)
+
     if os.path.exists(CACHE_SESSION_FILE):
         try:
             with open(CACHE_SESSION_FILE, 'r', encoding='utf-8') as f:
@@ -2723,6 +2734,25 @@ def get_supabase_session():
     return data
 
 def save_supabase_session(data):
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates"
+        }
+        meta_row = [{
+            "key": "__CACHE_SESSION__",
+            "seller_name": json.dumps(data),
+            "qty": 0,
+            "rate": 0,
+            "state": "",
+            "sheet_name": ""
+        }]
+        requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers, json=meta_row, timeout=10)
+    except Exception as e:
+        print(f"[SESSION SUPABASE WRITE ERR]: {e}", flush=True)
+
     try:
         with open(CACHE_SESSION_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
