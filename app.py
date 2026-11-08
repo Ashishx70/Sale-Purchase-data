@@ -1637,6 +1637,27 @@ DEFAULT_SHEET_URLS = {
 def load_fy_all_settings():
     urls = dict(DEFAULT_FY_URLS)
     sheet_urls = dict(DEFAULT_SHEET_URLS)
+    
+    # 1. Cloud-backed persistence via Supabase (survives Render restarts and ephemeral disk wipes)
+    try:
+        if 'SUPABASE_URL' in globals() and 'SUPABASE_KEY' in globals():
+            headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            url = f"{SUPABASE_URL}/rest/v1/sale_cache?key=eq.__FY_SETTINGS__&select=seller_name"
+            r = requests.get(url, headers=headers, timeout=5)
+            if r.status_code == 200 and r.json():
+                raw_meta = r.json()[0].get('seller_name', '')
+                if raw_meta:
+                    supa_data = json.loads(raw_meta)
+                    if isinstance(supa_data, dict):
+                        if 'urls' in supa_data and isinstance(supa_data['urls'], dict):
+                            urls.update(supa_data['urls'])
+                        if 'sheet_urls' in supa_data and isinstance(supa_data['sheet_urls'], dict):
+                            sheet_urls.update(supa_data['sheet_urls'])
+                        return urls, sheet_urls
+    except Exception as se:
+        pass
+
+    # 2. Local file fallback
     if os.path.exists(FY_SETTINGS_FILE):
         try:
             with open(FY_SETTINGS_FILE, 'r', encoding='utf-8') as f:
@@ -1644,12 +1665,8 @@ def load_fy_all_settings():
                 if isinstance(data, dict):
                     if 'urls' in data and isinstance(data['urls'], dict):
                         urls.update(data['urls'])
-                        if 'sheet_urls' in data and isinstance(data['sheet_urls'], dict):
-                            sheet_urls.update(data['sheet_urls'])
-                    else:
-                        for k, v in data.items():
-                            if isinstance(v, str):
-                                urls[k] = v
+                    if 'sheet_urls' in data and isinstance(data['sheet_urls'], dict):
+                        sheet_urls.update(data['sheet_urls'])
         except Exception as err:
             print(f"[FY SETTINGS] Error reading fy_settings.json: {str(err)}", flush=True)
     return urls, sheet_urls
@@ -1660,26 +1677,48 @@ def load_fy_settings():
 
 def save_fy_settings_file(urls, sheet_urls=None):
     try:
-        cur_urls, cur_sheet_urls = load_fy_all_settings()
-        if isinstance(urls, dict):
-            for k, v in urls.items():
-                if v and str(v).strip():
-                    cur_urls[k] = str(v).strip()
-                elif k not in cur_urls:
-                    cur_urls[k] = ''
-        if isinstance(sheet_urls, dict):
-            for k, v in sheet_urls.items():
-                if v and str(v).strip():
-                    cur_sheet_urls[k] = str(v).strip()
-                elif k not in cur_sheet_urls:
-                    cur_sheet_urls[k] = ''
+        clean_urls = dict(urls) if isinstance(urls, dict) else {}
+        clean_sheet_urls = dict(sheet_urls) if isinstance(sheet_urls, dict) else {}
+        
+        # Ensure default baseline exists if not present
+        for k, v in DEFAULT_FY_URLS.items():
+            if k not in clean_urls:
+                clean_urls[k] = v
+        for k, v in DEFAULT_SHEET_URLS.items():
+            if k not in clean_sheet_urls:
+                clean_sheet_urls[k] = v
+
         full_data = {
-            'urls': cur_urls,
-            'sheet_urls': cur_sheet_urls
+            'urls': clean_urls,
+            'sheet_urls': clean_sheet_urls
         }
+        
+        # 1. Local disk persistence
         with open(FY_SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(full_data, f, indent=2, ensure_ascii=False)
         print(f"[FY SETTINGS] Saved multi-year settings to fy_settings.json: {full_data}", flush=True)
+
+        # 2. Supabase Cloud persistence (Never wiped across Render container resets)
+        if 'SUPABASE_URL' in globals() and 'SUPABASE_KEY' in globals():
+            try:
+                headers = {
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates"
+                }
+                meta_row = [{
+                    "key": "__FY_SETTINGS__",
+                    "seller_name": json.dumps(full_data),
+                    "qty": 0,
+                    "rate": 0,
+                    "state": "",
+                    "sheet_name": "__SYS__"
+                }]
+                requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers, json=meta_row, timeout=10)
+                print("[FY SETTINGS] Successfully cloud-persisted multi-year settings to Supabase!", flush=True)
+            except Exception as se:
+                print(f"[FY SETTINGS SUPABASE WRITE ERR]: {se}", flush=True)
 
     except Exception as err:
         print(f"[FY SETTINGS ERROR] Failed to save fy_settings.json: {str(err)}", flush=True)
@@ -2702,7 +2741,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://zjxaottgkumhydhsylor.supa
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", base64.b64decode(_ENC_KEY).decode('utf-8'))
 
 CACHE_SESSION_FILE = os.path.join(DATA_DIR, 'supabase_session.json')
-CACHE_TTL_SECONDS = 5 * 3600  # 5 Hours Working Cache TTL
+CACHE_TTL_SECONDS = 9 * 3600  # 9 Hours Working Cache TTL
 
 _supabase_sync_status = {
     "status": "idle",
@@ -2766,10 +2805,13 @@ def nill_supabase_tables():
         "Authorization": f"Bearer {SUPABASE_KEY}"
     }
     try:
+        # Preserve multi-year settings before nilling cache rows
+        cur_urls, cur_sheet_urls = load_fy_all_settings()
         requests.delete(f"{SUPABASE_URL}/rest/v1/sale_cache?key=not.is.null", headers=headers, timeout=30)
         requests.delete(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.is.null", headers=headers, timeout=30)
         save_supabase_session({"synced_at": 0, "active_sheets": []})
-        print("[SUPABASE NILL] Successfully wiped all cache tables to 0 rows.", flush=True)
+        save_fy_settings_file(cur_urls, cur_sheet_urls)
+        print("[SUPABASE NILL] Successfully wiped cache tables to 0 rows while preserving settings.", flush=True)
         return True
     except Exception as e:
         print(f"[NILL SUPABASE ERROR]: {e}", flush=True)
@@ -2785,14 +2827,14 @@ def get_supabase_live_counts():
     sale_count = 0
     purchase_count = 0
     try:
-        r_s = requests.get(f"{SUPABASE_URL}/rest/v1/sale_cache?select=key", headers=headers, timeout=10)
+        r_s = requests.get(f"{SUPABASE_URL}/rest/v1/sale_cache?key=not.like.__%25&select=key", headers=headers, timeout=10)
         rng_s = r_s.headers.get("content-range", "")
         if "/" in rng_s:
             try:
                 sale_count = int(rng_s.split("/")[-1])
             except ValueError:
                 sale_count = 0
-        r_p = requests.get(f"{SUPABASE_URL}/rest/v1/purchase_cache?select=key", headers=headers, timeout=10)
+        r_p = requests.get(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.like.__%25&select=key", headers=headers, timeout=10)
         rng_p = r_p.headers.get("content-range", "")
         if "/" in rng_p:
             try:

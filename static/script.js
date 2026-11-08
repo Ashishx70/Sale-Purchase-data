@@ -182,17 +182,17 @@ async function fetchFySettingsFromServer() {
 
         if (data && data.status === 'Success') {
 
-            if (data.urls) {
+            const localUrls = getSavedFyUrls();
 
-                saveFyUrls(data.urls);
+            const localSheetUrls = getSavedFySheetUrls();
 
-            }
+            const mergedUrls = Object.assign({}, localUrls, data.urls || {});
 
-            if (data.sheet_urls) {
+            const mergedSheetUrls = Object.assign({}, localSheetUrls, data.sheet_urls || {});
 
-                saveFySheetUrls(data.sheet_urls);
+            saveFyUrls(mergedUrls);
 
-            }
+            saveFySheetUrls(mergedSheetUrls);
 
             populateFYSelector();
 
@@ -1102,7 +1102,9 @@ function populateFYSelector() {
 
     const urls = getSavedFyUrls();
 
-    const keys = Object.keys(urls).sort();
+    const sheetUrls = getSavedFySheetUrls();
+
+    const keys = Array.from(new Set([...Object.keys(urls), ...Object.keys(sheetUrls)])).sort();
 
     menu.innerHTML = '';
 
@@ -3119,7 +3121,7 @@ async function saveSettings() {
 
     try {
 
-        await fetch('/api/save-fy-settings', {
+        const res = await fetch('/api/save-fy-settings', {
 
             method: 'POST',
 
@@ -3129,6 +3131,16 @@ async function saveSettings() {
 
         });
 
+        const data = await res.json();
+
+        if (data && data.status === 'Success') {
+
+            if (data.urls) saveFyUrls(data.urls);
+
+            if (data.sheet_urls) saveFySheetUrls(data.sheet_urls);
+
+        }
+
     } catch(e) {
 
         console.error('[FY SETTINGS] Failed to sync settings to server:', e);
@@ -3137,7 +3149,7 @@ async function saveSettings() {
 
     closeSettingsModal();
 
-    showToast('✅', 'Settings Saved! Fast Viewer is active.');
+    showToast('Settings Saved! Fast Viewer is active.', 'success');
 
     populateFYSelector();
 
