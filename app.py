@@ -2983,29 +2983,80 @@ def sync_selected_sheets_worker(selected_sheets, clear_first=True):
             print(f"[SUPABASE SYNC] [{target}] [WARN] No data rows could be retrieved from sheet! Check permissions.", flush=True)
             continue
 
-        # Upload Sales to Supabase in batches of 2000
-        total_s_count = len(sale_rows)
-        for s_chunk_start in range(0, total_s_count, 2000):
-            batch = sale_rows[s_chunk_start:s_chunk_start + 2000]
-            requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers_supa, json=batch, timeout=30)
-            total_sale_all += len(batch)
-            pct_now = sheet_base_pct + int((min(total_s_count, s_chunk_start + 2000) / max(1, total_s_count)) * (sheet_span * 0.5))
-            _supabase_sync_status["percent"] = min(95, max(5, pct_now))
-            _supabase_sync_status["message"] = f"Saving '{target}' Sales: {total_sale_all:,} rows ({pct_now}%)..."
-            _supabase_sync_status["sale_synced"] = total_sale_all
-            print(f"[SUPABASE SYNC] [{target}] Uploaded Sales batch: +{len(batch):,} rows | Total Sales: {total_sale_all:,} ({pct_now}%)", flush=True)
+        # High-Speed Parallel Upload to Supabase (5,000 rows/batch, max_workers=4, Sales + Purchases simultaneous)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading, gc
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
 
-        # Upload Purchases to Supabase in batches of 2000
+        CHUNK_SIZE = 5000
+        total_s_count = len(sale_rows)
         total_p_count = len(purch_rows)
-        for p_chunk_start in range(0, total_p_count, 2000):
-            p_batch = purch_rows[p_chunk_start:p_chunk_start + 2000]
-            requests.post(f"{SUPABASE_URL}/rest/v1/purchase_cache", headers=headers_supa, json=p_batch, timeout=30)
-            total_purchase_all += len(p_batch)
-            pct_now = sheet_base_pct + int(sheet_span * 0.5) + int((min(total_p_count, p_chunk_start + 2000) / max(1, total_p_count)) * (sheet_span * 0.45))
-            _supabase_sync_status["percent"] = min(98, max(5, pct_now))
-            _supabase_sync_status["message"] = f"Saving '{target}' Purchases: {total_purchase_all:,} rows ({pct_now}%)..."
-            _supabase_sync_status["purchase_synced"] = total_purchase_all
-            print(f"[SUPABASE SYNC] [{target}] Uploaded Purchases batch: +{len(p_batch):,} rows | Total Purchases: {total_purchase_all:,} ({pct_now}%)", flush=True)
+        target_s_synced = 0
+        target_p_synced = 0
+        sync_lock = threading.Lock()
+
+        # Session with connection pooling & retries for keep-alive speed
+        session_supa = requests.Session()
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10, max_retries=Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504]))
+        session_supa.mount('https://', adapter)
+        session_supa.mount('http://', adapter)
+
+        # Slice into chunks of 5000
+        s_chunks = [sale_rows[i:i + CHUNK_SIZE] for i in range(0, total_s_count, CHUNK_SIZE)]
+        p_chunks = [purch_rows[i:i + CHUNK_SIZE] for i in range(0, total_p_count, CHUNK_SIZE)]
+
+        # Interleave tasks: alternating (table, chunk, is_sale) so workers pick both tables simultaneously
+        tasks = []
+        max_chunks = max(len(s_chunks), len(p_chunks))
+        for idx in range(max_chunks):
+            if idx < len(s_chunks):
+                tasks.append(("sale_cache", s_chunks[idx], True))
+            if idx < len(p_chunks):
+                tasks.append(("purchase_cache", p_chunks[idx], False))
+
+        def upload_chunk_worker(table_name, chunk_data, is_sale):
+            nonlocal target_s_synced, target_p_synced, total_sale_all, total_purchase_all
+            url = f"{SUPABASE_URL}/rest/v1/{table_name}"
+            resp = session_supa.post(url, headers=headers_supa, json=chunk_data, timeout=60)
+            if resp.status_code not in (200, 201, 204):
+                print(f"[SUPABASE UPLOAD ERR] {table_name}: HTTP {resp.status_code} - {resp.text[:200]}", flush=True)
+                resp.raise_for_status()
+
+            chunk_len = len(chunk_data)
+            table_label = "Sales" if is_sale else "Purchases"
+
+            with sync_lock:
+                if is_sale:
+                    total_sale_all += chunk_len
+                    target_s_synced += chunk_len
+                else:
+                    total_purchase_all += chunk_len
+                    target_p_synced += chunk_len
+
+                combined_synced = target_s_synced + target_p_synced
+                combined_total = max(1, total_s_count + total_p_count)
+                pct_now = sheet_base_pct + int((combined_synced / combined_total) * sheet_span)
+                pct_now = min(98, max(5, pct_now))
+
+                _supabase_sync_status["percent"] = pct_now
+                _supabase_sync_status["sale_synced"] = total_sale_all
+                _supabase_sync_status["purchase_synced"] = total_purchase_all
+                _supabase_sync_status["message"] = f"Saving '{target}' | Sales: {target_s_synced:,}/{total_s_count:,} | Purchases: {target_p_synced:,}/{total_p_count:,} ({pct_now}%)"
+                print(f"[SUPABASE SYNC] [{target}] Uploaded {table_label} batch: +{chunk_len:,} rows | {table_label}: {target_s_synced if is_sale else target_p_synced:,}/{total_s_count if is_sale else total_p_count:,} ({pct_now}%)", flush=True)
+
+        print(f"[SUPABASE SYNC] [{target}] Launching parallel upload: {len(s_chunks)} Sales chunks & {len(p_chunks)} Purchases chunks (5,000 rows/batch, 4 workers)...", flush=True)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(upload_chunk_worker, tbl, chk, is_s) for tbl, chk, is_s in tasks]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as ex:
+                    print(f"[SUPABASE CHUNK ERROR] {target}: {ex}", flush=True)
+
+        del s_chunks, p_chunks, tasks, sale_rows, purch_rows
+        gc.collect()
 
     save_supabase_session({
         "synced_at": time.time(),
