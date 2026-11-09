@@ -3230,6 +3230,12 @@ def query_supabase_lookup(keys, is_sale=True):
     """Query keys from Supabase PostgreSQL cache in ultra-fast batches (10-30ms, ~0MB RAM)."""
     if not keys:
         return {}
+    session = get_supabase_session()
+    synced_at = session.get("synced_at", 0)
+    if synced_at > 0 and (time.time() - synced_at) > CACHE_TTL_SECONDS:
+        print("[LOOKUP] 9-Hour session expired! Auto-wiping Supabase tables to Nill...", flush=True)
+        nill_supabase_tables()
+        return {}
     import urllib.parse
     
     mapping = {}
