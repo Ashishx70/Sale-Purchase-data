@@ -2799,7 +2799,7 @@ def save_supabase_session(data):
             "qty": 0,
             "rate": 0,
             "state": "",
-            "sheet_name": ""
+            "sheet_name": "__SYS__"
         }]
         requests.post(f"{SUPABASE_URL}/rest/v1/sale_cache", headers=headers, json=meta_row, timeout=10)
     except Exception as e:
@@ -2820,8 +2820,8 @@ def nill_supabase_tables():
     try:
         # Preserve multi-year settings before nilling cache rows
         cur_urls, cur_sheet_urls = load_fy_all_settings()
-        requests.delete(f"{SUPABASE_URL}/rest/v1/sale_cache?sheet_name=neq.__SYS__", headers=headers, timeout=30)
-        requests.delete(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.is.null", headers=headers, timeout=30)
+        requests.delete(f"{SUPABASE_URL}/rest/v1/sale_cache?sheet_name=neq.__SYS__", headers=headers, timeout=60)
+        requests.delete(f"{SUPABASE_URL}/rest/v1/purchase_cache?key=not.is.null", headers=headers, timeout=60)
         save_supabase_session({"synced_at": 0, "active_sheets": []})
         save_fy_settings_file(cur_urls, cur_sheet_urls)
         print("[SUPABASE NILL] Successfully wiped cache tables to 0 rows while preserving settings.", flush=True)
@@ -2829,6 +2829,28 @@ def nill_supabase_tables():
     except Exception as e:
         print(f"[NILL SUPABASE ERROR]: {e}", flush=True)
         return False
+
+def _supabase_ttl_auto_cleaner():
+    """Background watchdog thread that checks every 5 minutes and automatically wipes tables once 9 hours expire."""
+    while True:
+        try:
+            time.sleep(300)  # Check every 5 minutes
+            session = get_supabase_session()
+            synced_at = session.get("synced_at", 0)
+            if synced_at > 0:
+                elapsed = time.time() - synced_at
+                if elapsed > CACHE_TTL_SECONDS:
+                    print(f"[AUTO CLEANER] 9-Hour Cache TTL expired ({elapsed/3600:.1f}h > 9h). Automatically wiping Supabase cache tables to Nill...", flush=True)
+                    nill_supabase_tables()
+        except Exception as e:
+            print(f"[AUTO CLEANER ERR]: {e}", flush=True)
+
+try:
+    _cleaner_thread = threading.Thread(target=_supabase_ttl_auto_cleaner, daemon=True)
+    _cleaner_thread.start()
+    print("[SUPABASE TTL WATCHDOG] 9-Hour auto-expiration background cleaner thread started.", flush=True)
+except Exception as e:
+    print(f"[WATCHDOG START ERR]: {e}", flush=True)
 
 def get_supabase_live_counts():
     headers = {
@@ -3116,12 +3138,22 @@ def supabase_cache_status():
     if synced_at > 0:
         elapsed = now - synced_at
         if elapsed > CACHE_TTL_SECONDS:
-            is_expired = False  # Keep database intact; do NOT auto-delete user data
+            # 9-hour working session has expired! Automatically wipe cache tables to 0 (Nill)
+            print(f"[CACHE TTL EXPIRED] Session expired ({elapsed/3600:.1f}h > 9h). Automatically wiping Supabase cache tables to Nill...", flush=True)
+            nill_supabase_tables()
+            is_expired = True
+            synced_at = 0
             expires_in = 0
+            sale_count = 0
+            purchase_count = 0
+            active_sheets = []
         else:
             expires_in = int(CACHE_TTL_SECONDS - elapsed)
-    elif sale_count > 0 or purchase_count > 0:
-        expires_in = CACHE_TTL_SECONDS
+    else:
+        # synced_at is 0: if database is empty, mark as expired / clean
+        if sale_count == 0 and purchase_count == 0:
+            is_expired = True
+            active_sheets = []
         
     res_data = {
         "status": "Success",

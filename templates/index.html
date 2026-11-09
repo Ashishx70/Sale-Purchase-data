@@ -758,7 +758,7 @@
                             : 'Nill Database (0 Rows)';
                     }
                     
-                    if (totalCount > 0) {
+                    if (totalCount > 0 && !data.is_expired) {
                         badge.textContent = 'Active (Live)';
                         badge.style.background = 'rgba(16, 185, 129, 0.12)';
                         badge.style.border = '1px solid rgba(16, 185, 129, 0.3)';
@@ -950,6 +950,6 @@
     </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="/static/script.js?v=1.1.2"></script>
+    <script src="/static/script.js?v=1.1.3"></script>
 </body>
 </html>
