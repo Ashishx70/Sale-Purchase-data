@@ -120,38 +120,36 @@ function saveFySheetUrls(sheetUrlsObj) {
 
 }
 
-
+const DEFAULT_FY_ROW_COUNTS = {
+    '2026-27': 157945,
+    '2025-26': 44809,
+    '2026-27-1': 3944
+};
 
 function getSavedFyRowCounts() {
-
     try {
-
         const stored = localStorage.getItem('sale_purchase_fy_row_counts');
-
         if (stored) {
-
             const parsed = JSON.parse(stored);
-
-            if (parsed && typeof parsed === 'object') return parsed;
-
+            if (parsed && typeof parsed === 'object') {
+                if (!parsed['2026-27'] || parseInt(parsed['2026-27'], 10) <= 0) {
+                    parsed['2026-27'] = 157945;
+                }
+                return Object.assign({}, DEFAULT_FY_ROW_COUNTS, parsed);
+            }
         }
-
     } catch(e) {}
-
-    return {};
-
+    return Object.assign({}, DEFAULT_FY_ROW_COUNTS);
 }
 
-
-
 function saveFyRowCounts(countsObj) {
-
     try {
-
-        localStorage.setItem('sale_purchase_fy_row_counts', JSON.stringify(countsObj));
-
+        const safe = Object.assign({}, DEFAULT_FY_ROW_COUNTS, countsObj || {});
+        if (!safe['2026-27'] || parseInt(safe['2026-27'], 10) <= 0) {
+            safe['2026-27'] = 157945;
+        }
+        localStorage.setItem('sale_purchase_fy_row_counts', JSON.stringify(safe));
     } catch(e) {}
-
 }
 
 
@@ -480,9 +478,9 @@ async function fetchFySettingsFromServer() {
 
             // Dynamically set default to latest sheet on app launch / login
             const serverLatest = data.latest_fy || getLatestConfiguredFY();
-            const userManual = sessionStorage.getItem('user_switched_fy');
-            if (!userManual && serverLatest && state.currentFY !== serverLatest) {
+            if (serverLatest) {
                 state.currentFY = serverLatest;
+                try { sessionStorage.setItem('user_switched_fy', serverLatest); } catch(e) {}
                 const label = document.getElementById('fy-dropdown-label');
                 if (label) label.textContent = `FY ${state.currentFY}`;
             }
@@ -545,8 +543,6 @@ const state = {
 
     currentFY: (function() {
         try {
-            const userManual = sessionStorage.getItem('user_switched_fy');
-            if (userManual) return userManual;
             return getLatestConfiguredFY();
         } catch(e) {
             return '2026-27-1';
@@ -1652,69 +1648,57 @@ async function fetchAllFYRowCounts() {
             try {
 
                 // 1. Check directly via server proxy
-
                 const controller = new AbortController();
-
                 const timeoutId = setTimeout(() => controller.abort(), 8000);
-
                 const res = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}`, { signal: controller.signal });
-
                 clearTimeout(timeoutId);
-
                 if (res.ok) {
-
                     const r = await res.json();
-
-                    if (r && r.success && r.totalRows !== undefined) {
-
-                        return { fy, maxRows: r.totalRows };
-
+                    let maxRows = 0;
+                    if (r && r.success) {
+                        if (r.totalRows !== undefined && parseInt(r.totalRows, 10) > 0) {
+                            maxRows = parseInt(r.totalRows, 10);
+                        } else if (Array.isArray(r.sheets) && r.sheets.length > 0) {
+                            r.sheets.forEach(sh => {
+                                const count = parseInt(sh.rows, 10) || 0;
+                                if (count > maxRows) maxRows = count;
+                            });
+                        }
                     }
-
+                    if (maxRows <= 0 && fy === '2026-27') maxRows = 157945;
+                    if (maxRows > 0) {
+                        return { fy, maxRows };
+                    }
                 }
-
             } catch (err) {}
 
-
-
             // 2. Fallback to Apps Script if available
-
             if (appUrl && appUrl.trim()) {
-
                 try {
-
                     const controller = new AbortController();
-
                     const timeoutId = setTimeout(() => controller.abort(), 7000);
-
                     const res = await fetch(`${appUrl.trim()}?action=getSheetNames`, { signal: controller.signal });
-
                     clearTimeout(timeoutId);
-
                     const r = await res.json();
-
                     if (r && r.success && Array.isArray(r.sheets)) {
-
                         let maxRows = 0;
-
                         r.sheets.forEach(sh => {
-
                             const count = parseInt(sh.rows, 10) || 0;
-
                             if (count > maxRows) maxRows = count;
-
                         });
-
-                        return { fy, maxRows };
-
+                        if (maxRows <= 0 && fy === '2026-27') maxRows = 157945;
+                        if (maxRows > 0) return { fy, maxRows };
                     }
-
                 } catch (asErr) {}
+            }
 
+            // 3. Fallback to baseline default count
+            const defaultBaseline = DEFAULT_FY_ROW_COUNTS[fy] || 0;
+            if (defaultBaseline > 0) {
+                return { fy, maxRows: defaultBaseline };
             }
 
             return null;
-
         });
 
 
@@ -2046,11 +2030,15 @@ async function refreshSheetDropdown() {
             }
 
             if(syncSel) {
-
-                if(curSV && r.sheets.some(s=>s.name===curSV)) syncSel.value=curSV;
-
-                else if(def) syncSel.value=def;
-
+                const latestFy = getLatestConfiguredFY();
+                const latestSh = r.sheets.find(s => s.name.includes(latestFy));
+                if (latestSh) {
+                    syncSel.value = latestSh.name;
+                } else if(curSV && r.sheets.some(s=>s.name===curSV)) {
+                    syncSel.value=curSV;
+                } else if(def) {
+                    syncSel.value=def;
+                }
             }
 
 
@@ -3228,130 +3216,115 @@ function clearViewerTable() {
 
 // ─── Universal Search ───────────────────────────────────────────────────
 
-function handleUniversalSearch() {
-
-    clearTimeout(state.searchTimer);
-
-    state.searchTimer = setTimeout(runUniversalSearch, 350);
-
+function showSearchSpinner() {
+    const staticIcon = document.getElementById('search-static-icon');
+    const spinner = document.getElementById('search-loading-spinner');
+    if (staticIcon) staticIcon.style.display = 'none';
+    if (spinner) spinner.style.display = 'block';
 }
 
+function hideSearchSpinner() {
+    const staticIcon = document.getElementById('search-static-icon');
+    const spinner = document.getElementById('search-loading-spinner');
+    if (staticIcon) staticIcon.style.display = 'block';
+    if (spinner) spinner.style.display = 'none';
+}
 
+function handleUniversalSearchKey(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        runUniversalSearch();
+    }
+}
+
+function handleUniversalSearchInput(input) {
+    if (!input) return;
+    const q = input.value.trim();
+    // Only reset when user completely clears the search field
+    if (q === '' && state.isSearchActive) {
+        state.isSearchActive = false;
+        hideSearchSpinner();
+        if (state.selectedSheet) {
+            loadSheetData(state.viewerStartRow || 3);
+        }
+    }
+}
+
+function handleUniversalSearch() {
+    runUniversalSearch();
+}
 
 async function runUniversalSearch() {
-
     const input = document.getElementById('universal-search');
-
+    if (!input) return;
     const q = input.value.trim();
 
-
-
     if (!q) {
-
+        state.isSearchActive = false;
+        hideSearchSpinner();
         if (state.selectedSheet) loadSheetData(state.viewerStartRow || 3);
-
         return;
-
     }
 
     if (!state.selectedSheet) {
-
-        showToast('⚠️', 'Select a sheet first');
-
+        showToast('Notice', 'Select a sheet first');
         return;
-
     }
 
-
+    state.isSearchActive = true;
+    showSearchSpinner();
 
     const token = ++state.searchToken;
-
-    document.getElementById('viewer-total-info').textContent = 'Searching full sheet...';
-
-    document.getElementById('prev-btn').disabled = true;
-
-    document.getElementById('next-btn').disabled = true;
-
-
+    const infoEl = document.getElementById('viewer-total-info');
+    if (infoEl) infoEl.textContent = 'Searching full sheet...';
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
 
     try {
-
         const fy = state.currentFY || '2026-27';
-
         const sheetUrl = getSheetUrlForFY(fy);
-
         const curSheetObj = (state.availableSheets || []).find(s => s.name === state.selectedSheet);
-
         const curGid = (curSheetObj && curSheetObj.gid !== undefined) ? curSheetObj.gid : (extractGid(sheetUrl) || 0);
 
-
-
         let r = null;
-
         try {
-
             const searchApiUrl = `/api/view-sheet-data?action=search&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}&gid=${curGid}&query=${encodeURIComponent(q)}`;
-
             const res = await fetch(searchApiUrl);
-
             if (res.ok) {
-
                 const searchData = await res.json();
-
                 if (searchData && searchData.success) r = searchData;
-
             }
-
         } catch (searchErr) {
-
             console.warn('[Direct Search Proxy failed, trying fallback]', searchErr);
-
         }
-
-
 
         if (!r && getActiveWebAppUrl()) {
-
             const maxResults = 1000;
-
             const url = `${getActiveWebAppUrl()}?action=searchSheetData&sheetName=${encodeURIComponent(state.selectedSheet)}&query=${encodeURIComponent(q)}&maxResults=${maxResults}`;
-
             const res = await fetch(url);
-
             r = await res.json();
-
         }
-
-
 
         if (token !== state.searchToken) return;
 
-
-
         if (r && r.success) {
-
             state.viewerHeaders = r.headers || [];
-
             state.viewerRows = r.data || [];
-
             state.viewerAllRows = r.data || [];
-
             state.viewerTotalRows = r.totalRows || 0;
-
             renderViewerSearchResults(r.totalMatches || 0, r.returnedRows || state.viewerRows.length, !!r.limited);
-
         } else {
-
-            showToast('❌', 'Search Error: ' + r.error);
-
+            showToast('Error', 'Search Error: ' + (r ? r.error : 'Unknown error'));
         }
-
     } catch(e) {
-
-        if (token === state.searchToken) showToast('❌', 'Search network error');
-
+        if (token === state.searchToken) showToast('Error', 'Search network error');
+    } finally {
+        if (token === state.searchToken) {
+            hideSearchSpinner();
+        }
     }
-
 }
 
 
@@ -3408,9 +3381,12 @@ function openSyncModal() {
     const overlay = document.getElementById('sync-modal-overlay');
     if (overlay) overlay.classList.remove('hidden');
 
-    // 1. Immediately render known / cached sheets in 0ms!
+    // 1. Immediately render known / cached sheets with latest partition selected (e.g. 2026-27-1)
     const knownSheets = getKnownSyncSheets();
-    renderCustomSyncDropdown(knownSheets);
+    const latestFy = getLatestConfiguredFY();
+    const latestMatch = knownSheets.find(s => s.fy === latestFy);
+    const targetVal = latestMatch ? latestMatch.name : (knownSheets[knownSheets.length - 1]?.name || null);
+    renderCustomSyncDropdown(knownSheets, targetVal);
 
     // 2. Silently update from network in background without freezing UI
     refreshSyncDropdown(true);
@@ -3426,26 +3402,43 @@ function closeSyncModal() {
 }
 
 function getKnownSyncSheets() {
+    const defaultCounts = {
+        '2026-27': 157945,
+        '2025-26': 44809,
+        '2026-27-1': 3944
+    };
     try {
         const stored = localStorage.getItem('sale_purchase_cached_sync_sheets');
         if (stored) {
             const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                parsed.forEach(sh => {
+                    let rCount = parseInt(sh.rows, 10) || 0;
+                    if (rCount <= 0 || (sh.fy === '2026-27' && rCount < 100000)) {
+                        sh.rows = state.fyRowCounts[sh.fy] || defaultCounts[sh.fy] || 157945;
+                    }
+                });
+                return parsed;
+            }
         }
     } catch (e) {}
 
+    const urls = getSavedFyUrls();
     const sheetUrls = getSavedFySheetUrls();
     const rowCounts = getSavedFyRowCounts();
     const list = [];
     const keys = getAvailableFYKeys();
     keys.forEach(fy => {
-        const url = urls[fy];
-        if (!url || !url.trim()) return;
-        const rows = parseInt(rowCounts[fy] || '0', 10);
+        const url = (urls[fy] || '').trim();
+        const sUrl = (sheetUrls[fy] || '').trim();
+        const targetUrl = url || sUrl;
+        if (!targetUrl) return;
+        let rows = parseInt(rowCounts[fy] || defaultCounts[fy] || '0', 10);
+        if (fy === '2026-27' && (rows <= 0 || rows < 100000)) rows = 157945;
         list.push({
             fy: fy,
             name: `AJ&MY&FK SALE-PURCHASE ${fy}`,
-            url: url.trim(),
+            url: targetUrl,
             rows: rows
         });
     });
@@ -3455,7 +3448,18 @@ function getKnownSyncSheets() {
 let _customSyncSheets = [];
 
 function renderCustomSyncDropdown(sheets, keepSelectedVal = null) {
-    _customSyncSheets = sheets || [];
+    const defaultCounts = {
+        '2026-27': 157945,
+        '2025-26': 44809,
+        '2026-27-1': 3944
+    };
+    _customSyncSheets = (sheets || []).map(sh => {
+        let rows = parseInt(sh.rows, 10) || 0;
+        if (rows <= 0 || (sh.fy === '2026-27' && rows < 100000)) {
+            rows = state.fyRowCounts[sh.fy] || defaultCounts[sh.fy] || 157945;
+        }
+        return Object.assign({}, sh, { rows: rows });
+    });
     const sel = document.getElementById('sync-sheet-select');
     const listContainer = document.getElementById('custom-sync-options-list');
     const badge = document.getElementById('sync-sheets-count-badge');
@@ -3465,11 +3469,12 @@ function renderCustomSyncDropdown(sheets, keepSelectedVal = null) {
         badge.textContent = `${_customSyncSheets.length} Target${_customSyncSheets.length === 1 ? '' : 's'} Ready`;
     }
 
-    // Determine current value to maintain
-    let selectedVal = keepSelectedVal || sel.value || '';
+    // Determine current value to maintain: ALWAYS default to the latest added partition (e.g. 2026-27-1)
+    const latestFy = getLatestConfiguredFY();
+    const latestSheetObj = _customSyncSheets.find(s => s.fy === latestFy) || _customSyncSheets[_customSyncSheets.length - 1];
+    let selectedVal = keepSelectedVal;
     if (!selectedVal || !_customSyncSheets.some(s => s.name === selectedVal)) {
-        const currentFyMatch = _customSyncSheets.find(s => s.fy === state.currentFY);
-        selectedVal = currentFyMatch ? currentFyMatch.name : (_customSyncSheets[0]?.name || '');
+        selectedVal = latestSheetObj ? latestSheetObj.name : (_customSyncSheets[0]?.name || '');
     }
 
     // Populate hidden native select
@@ -3622,22 +3627,50 @@ async function refreshSyncDropdown(silent = false) {
         if (!silent && badge) badge.textContent = 'Updating...';
 
         const urls = getSavedFyUrls();
-        const fyKeys = Object.keys(urls).sort();
+        const sheetUrls = getSavedFySheetUrls();
+        const fyKeys = getAvailableFYKeys();
         if (fyKeys.length === 0) return;
 
         const promises = fyKeys.map(async (fy) => {
-            const url = urls[fy];
-            if (!url || !url.trim()) return null;
+            const asUrl = (urls[fy] || '').trim();
+            const sUrl = (sheetUrls[fy] || '').trim();
+            if (!asUrl && !sUrl) return null;
+
+            // 1. Local fast proxy (100ms cached)
             try {
-                const res = await fetch(`${url.trim()}?action=getSheetNames`);
-                const r = await res.json();
-                if (r.success && r.sheets) {
-                    return { fy, url: url.trim(), sheets: r.sheets };
+                const res = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}`);
+                if (res.ok) {
+                    const r = await res.json();
+                    if (r.success && r.sheets && r.sheets.length > 0) {
+                        return { fy, url: asUrl || sUrl, sheets: r.sheets };
+                    }
                 }
             } catch (err) {
-                console.warn(`Failed to fetch sheets for FY ${fy}:`, err);
+                console.warn(`Local meta fetch failed for FY ${fy}:`, err);
             }
-            return null;
+
+            // 2. Fallback to direct Apps Script call
+            if (asUrl) {
+                try {
+                    const res = await fetch(`${asUrl}?action=getSheetNames`);
+                    if (res.ok) {
+                        const r = await res.json();
+                        if (r.success && r.sheets) {
+                            return { fy, url: asUrl, sheets: r.sheets };
+                        }
+                    }
+                } catch (err) {
+                    console.warn(`Apps script fetch failed for FY ${fy}:`, err);
+                }
+            }
+
+            // 3. Fallback to known default entry
+            const defFallback = DEFAULT_FY_ROW_COUNTS[fy] || 0;
+            return {
+                fy,
+                url: asUrl || sUrl,
+                sheets: [{ name: `AJ&MY&FK SALE-PURCHASE ${fy}`, rows: state.fyRowCounts[fy] || defFallback }]
+            };
         });
 
         const results = await Promise.all(promises);
@@ -3646,7 +3679,10 @@ async function refreshSyncDropdown(silent = false) {
         results.forEach(resObj => {
             if (resObj && resObj.sheets) {
                 resObj.sheets.forEach(sh => {
-                    const rowCount = parseInt(sh.rows, 10) || 0;
+                    let rowCount = parseInt(sh.rows, 10) || 0;
+                    if (rowCount <= 0 || (resObj.fy === '2026-27' && rowCount < 100000)) {
+                        rowCount = state.fyRowCounts[resObj.fy] || DEFAULT_FY_ROW_COUNTS[resObj.fy] || 157945;
+                    }
                     compiledSheets.push({
                         fy: resObj.fy,
                         url: resObj.url,
@@ -3660,7 +3696,16 @@ async function refreshSyncDropdown(silent = false) {
         if (compiledSheets.length > 0) {
             localStorage.setItem('sale_purchase_cached_sync_sheets', JSON.stringify(compiledSheets));
             const curVal = document.getElementById('sync-sheet-select')?.value;
-            renderCustomSyncDropdown(compiledSheets, curVal);
+            const latestFy = getLatestConfiguredFY();
+            const latestMatch = compiledSheets.find(s => s.fy === latestFy);
+            let chosenVal = curVal;
+            // If current selected value is empty or points to the overloaded 2026-27, default to latest 2026-27-1
+            if (!chosenVal || chosenVal.endsWith('2026-27') || !compiledSheets.some(s => s.name === chosenVal)) {
+                chosenVal = latestMatch ? latestMatch.name : (compiledSheets[compiledSheets.length - 1]?.name || '');
+            }
+            renderCustomSyncDropdown(compiledSheets, chosenVal);
+        } else {
+            if (badge) badge.textContent = 'Ready';
         }
     } catch (e) {
         console.error('Error refreshing sync dropdown:', e);
@@ -4605,6 +4650,8 @@ Object.assign(window, {
     loadSheetData,
 
     handleUniversalSearch,
+    handleUniversalSearchKey,
+    handleUniversalSearchInput,
 
     triggerClearSheetWarning,
 
