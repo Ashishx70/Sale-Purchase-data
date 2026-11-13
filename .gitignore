@@ -15,3 +15,10 @@ migrate_to_supabase.py
 *gmail-otp-reader*.json
 *service_account*.json
 credentials*.json
+
+# Session & temporary debug files
+supabase_session.json
+scratch/
+test_crop.png
+user_screen_crop.png
+

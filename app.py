@@ -18,6 +18,8 @@ import time
 import math
 import json
 import traceback
+import csv
+from urllib.parse import quote, unquote
 import pickle
 import tempfile
 import requests
@@ -1644,7 +1646,8 @@ DEFAULT_FY_URLS = {
 
 DEFAULT_SHEET_URLS = {
     '2025-26': 'https://docs.google.com/spreadsheets/d/1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To/edit',
-    '2026-27': 'https://docs.google.com/spreadsheets/d/1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w/edit'
+    '2026-27': 'https://docs.google.com/spreadsheets/d/1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w/edit',
+    '2026-27-1': 'https://docs.google.com/spreadsheets/d/1wcnhQnTZruaVNDMJbg3ssCskDV-7WmKLDXX8Q6YgvU4/edit?usp=sharing'
 }
 
 def load_fy_all_settings():
@@ -1687,6 +1690,24 @@ def load_fy_all_settings():
 def load_fy_settings():
     urls, _ = load_fy_all_settings()
     return urls
+
+def parse_fy_key(k):
+    m = re.match(r'(\d{4})[-/](\d{2,4})(?:[-/](\d+))?', str(k).strip())
+    if m:
+        start_yr = int(m.group(1))
+        end_raw = int(m.group(2))
+        end_yr = 2000 + end_raw if end_raw < 100 else end_raw
+        part = int(m.group(3)) if m.group(3) else 0
+        return (start_yr, end_yr, part)
+    nums = [int(n) for n in re.findall(r'\d+', str(k))]
+    return tuple(nums) if nums else (0, 0, 0)
+
+def get_latest_fy():
+    urls, sheet_urls = load_fy_all_settings()
+    all_keys = list(set(list(urls.keys()) + list(sheet_urls.keys())))
+    if not all_keys:
+        return '2026-27-1'
+    return sorted(all_keys, key=parse_fy_key)[-1]
 
 def save_fy_settings_file(urls, sheet_urls=None):
     try:
@@ -1746,7 +1767,8 @@ def get_fy_settings():
         response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
         return response
     urls, sheet_urls = load_fy_all_settings()
-    response = jsonify({"status": "Success", "urls": urls, "sheet_urls": sheet_urls})
+    latest_fy = get_latest_fy()
+    response = jsonify({"status": "Success", "urls": urls, "sheet_urls": sheet_urls, "latest_fy": latest_fy})
     response.headers.add("Access-Control-Allow-Origin", "*")
     return response
 
@@ -1765,7 +1787,8 @@ def save_fy_settings():
         if isinstance(urls, dict) or isinstance(sheet_urls, dict):
             save_fy_settings_file(urls, sheet_urls)
             threading.Thread(target=_load_cache_safely, daemon=True).start()
-            response = jsonify({"status": "Success", "message": "Multi-Year FY settings saved successfully", "urls": urls, "sheet_urls": sheet_urls})
+            latest_fy = get_latest_fy()
+            response = jsonify({"status": "Success", "message": "Multi-Year FY settings saved successfully", "urls": urls, "sheet_urls": sheet_urls, "latest_fy": latest_fy})
             response.headers.add("Access-Control-Allow-Origin", "*")
             return response
         else:
@@ -1777,6 +1800,235 @@ def save_fy_settings():
         response = jsonify({"status": "Error", "message": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
+_SHEET_CSV_CACHE = {}  # key: (sid, gid) -> {"timestamp": float, "headers": list, "data": list}
+
+def _fetch_sheet_raw_csv_cached(sid, gid, max_age_seconds=20, force=False):
+    """Fetch raw Google Sheet CSV via native export without GViz datatype coercion."""
+    cache_key = f"{sid}_{gid}"
+    now = time.time()
+    if not force and cache_key in _SHEET_CSV_CACHE:
+        entry = _SHEET_CSV_CACHE[cache_key]
+        if now - entry['timestamp'] < max_age_seconds:
+            return entry['headers'], entry['data']
+
+    headers_req = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    export_url = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv&gid={gid}"
+    r = requests.get(export_url, headers=headers_req, timeout=25)
+    if r.status_code != 200:
+        raise ValueError(f"Failed to fetch sheet from Google (HTTP {r.status_code})")
+
+    reader = list(csv.reader(io.StringIO(r.text)))
+    if not reader:
+        return [], []
+
+    # Detect header row: find row containing 'invoice' (case-insensitive)
+    header_idx = 0
+    for idx, row in enumerate(reader[:4]):
+        if any('invoice' in str(c).lower() for c in row):
+            header_idx = idx
+            break
+
+    headers = reader[header_idx]
+    data_rows = reader[header_idx + 1:]
+
+    num_cols = len(headers)
+    for row in data_rows:
+        if len(row) < num_cols:
+            row.extend([''] * (num_cols - len(row)))
+
+    _SHEET_CSV_CACHE[cache_key] = {
+        'timestamp': now,
+        'headers': headers,
+        'data': data_rows
+    }
+    return headers, data_rows
+
+@app.route('/api/view-sheet-data', methods=['GET', 'POST', 'OPTIONS'])
+def api_view_sheet_data():
+    """Direct, high-precision proxy for Google Sheet data viewing without requiring Google Apps Script."""
+    if request.method == 'OPTIONS':
+        response = jsonify({"status": "Success"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        return response
+
+    data = request.get_json(silent=True) or {}
+    args = request.args
+
+    action = args.get('action') or data.get('action') or 'getData'
+    latest_fy = get_latest_fy()
+    fy = args.get('fy') or data.get('fy') or latest_fy
+    sheet_url = args.get('sheetUrl') or data.get('sheetUrl') or ''
+    gid = args.get('gid') or data.get('gid') or '0'
+    query = (args.get('query') or data.get('query') or '').strip()
+    force_refresh = args.get('refresh') == '1' or data.get('refresh') == '1'
+
+    # 1. Resolve spreadsheet ID & sheet URL
+    if not sheet_url:
+        urls, sheet_urls = load_fy_all_settings()
+        sheet_url = sheet_urls.get(fy, '')
+        if not sheet_url:
+            sheet_url = DEFAULT_SHEET_URLS.get(fy, DEFAULT_SHEET_URLS.get(latest_fy, ''))
+
+    # Extract spreadsheetId
+    match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sheet_url)
+    sid = match.group(1) if match else ''
+
+    # Extract gid from URL if present and gid was 0 or not given
+    gid_match = re.search(r'[#?&]gid=([0-9]+)', sheet_url)
+    if gid_match and (not gid or gid == '0'):
+        gid = gid_match.group(1)
+
+    if not sid:
+        response = jsonify({'success': False, 'error': f'Invalid Google Sheet URL for FY {fy}'})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 400
+
+    # Auto-persist sheet_url in fy_settings if missing
+    try:
+        urls, current_sheet_urls = load_fy_all_settings()
+        if fy not in current_sheet_urls or current_sheet_urls[fy] != sheet_url:
+            current_sheet_urls[fy] = sheet_url
+            save_fy_settings_file(urls, current_sheet_urls)
+    except Exception:
+        pass
+
+    headers_req = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # Handle action: getMetadata
+    if action == 'getMetadata':
+        # Fast path 1: If Apps Script is configured for this FY (e.g. 2025-26, 2026-27), query it directly
+        urls_map, _ = load_fy_all_settings()
+        as_url = urls_map.get(fy, '').strip()
+        if as_url:
+            try:
+                as_res = requests.get(f"{as_url}?action=getSheetNames", headers=headers_req, timeout=6)
+                if as_res.status_code == 200:
+                    as_json = as_res.json()
+                    if as_json.get('success'):
+                        response = jsonify(as_json)
+                        response.headers.add("Access-Control-Allow-Origin", "*")
+                        return response
+            except Exception as ae:
+                print(f"[VIEW SHEET META] Apps script fast path fallback: {ae}", flush=True)
+
+        # Fast path 2: For direct sheets without Apps Script (e.g. 2026-27-1), fetch metadata
+        total_rows = 0
+        try:
+            _, raw_data = _fetch_sheet_raw_csv_cached(sid, gid, force=force_refresh)
+            total_rows = len(raw_data)
+        except Exception as ce:
+            print(f"[VIEW SHEET META] Raw export load failed: {ce}", flush=True)
+
+        sheets_list = []
+        try:
+            edit_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+            res = requests.get(edit_url, headers=headers_req, timeout=10)
+            if res.status_code == 200:
+                html = res.text
+                match = re.search(r'bootstrapData\s*=\s*({.+?});', html)
+                if not match:
+                    match = re.search(r'var\s+bootstrapData\s*=\s*({.+?});', html)
+                if match:
+                    bdata = json.loads(match.group(1))
+                    topsnapshot = bdata.get('changes', {}).get('topsnapshot', [])
+                    for item in topsnapshot:
+                        if isinstance(item, list) and len(item) >= 2:
+                            payload_str = item[1]
+                            if isinstance(payload_str, str) and payload_str.startswith('['):
+                                inner = json.loads(payload_str)
+                                if isinstance(inner, list) and len(inner) >= 4:
+                                    s_gid = str(inner[2])
+                                    props_list = inner[3]
+                                    if isinstance(props_list, list) and len(props_list) > 0:
+                                        p_dict = props_list[0]
+                                        if isinstance(p_dict, dict) and '1' in p_dict:
+                                            tb = p_dict['1']
+                                            if isinstance(tb, list) and len(tb) > 0 and len(tb[0]) >= 3:
+                                                s_title = tb[0][2]
+                                                sheets_list.append({"name": s_title, "gid": s_gid, "rows": total_rows})
+        except Exception as se:
+            print(f"[VIEW SHEET META] Sheet tabs extraction failed: {se}", flush=True)
+
+        if not sheets_list:
+            sheets_list = [{"name": f"Sheet FY {fy}", "gid": gid or "0", "rows": total_rows}]
+
+        response = jsonify({
+            'success': True,
+            'spreadsheetId': sid,
+            'sheets': sheets_list,
+            'totalRows': total_rows
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+
+    # Handle action: getData
+    if action == 'getData':
+        try:
+            headers, data_rows = _fetch_sheet_raw_csv_cached(sid, gid, force=force_refresh)
+            total_rows = len(data_rows)
+
+            limit = int(args.get('limit') or data.get('limit') or 50)
+            start = -1
+            if 'start' in args or 'start' in data:
+                start = int(args.get('start') or data.get('start') or 0)
+            elif 'fromRow' in args or 'fromRow' in data:
+                from_row = int(args.get('fromRow') or data.get('fromRow') or 1)
+                start = max(0, from_row - (2 if from_row > 1 else 1))
+            else:
+                p = max(0, int(args.get('page') or 0))
+                start = p * limit
+
+            if start < 0:
+                start = 0
+
+            page_data = data_rows[start : start + limit]
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers] if headers else [],
+                'data': page_data,
+                'totalRows': total_rows
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as de:
+            traceback.print_exc()
+            response = jsonify({'success': False, 'error': str(de)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    # Handle action: search
+    if action == 'search':
+        try:
+            if not query:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers, data_rows = _fetch_sheet_raw_csv_cached(sid, gid, force=force_refresh)
+            q_lower = query.lower()
+            matched = [r_item for r_item in data_rows if any(q_lower in str(cell).lower() for cell in r_item)][:200]
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers] if headers else [],
+                'data': matched,
+                'totalMatches': len(matched),
+                'limited': len(matched) >= 200
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as se:
+            response = jsonify({'success': False, 'error': str(se)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    response = jsonify({'success': False, 'error': f'Unknown action {action}'})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response, 400
 
 _sync_progress = {"status": "idle", "percent": 0, "message": ""}
 
@@ -3378,6 +3630,193 @@ def lookup_sale_quantities():
         response = jsonify({"status": "Error", "message": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
+
+
+    # Auto-persist sheet_url in fy_settings if missing
+    try:
+        urls, current_sheet_urls = load_fy_all_settings()
+        if fy not in current_sheet_urls or current_sheet_urls[fy] != sheet_url:
+            current_sheet_urls[fy] = sheet_url
+            save_fy_settings_file(urls, current_sheet_urls)
+    except Exception:
+        pass
+
+    headers_req = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # Handle action: getMetadata
+    if action == 'getMetadata':
+        total_rows = 0
+        try:
+            count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+            r = requests.get(count_url, headers=headers_req, timeout=10)
+            if r.status_code == 200:
+                c_reader = list(csv.reader(io.StringIO(r.text)))
+                if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                    total_rows = int(float(c_reader[1][0]))
+        except Exception as ce:
+            print(f"[VIEW SHEET META] Count query failed: {ce}", flush=True)
+
+        sheets_list = []
+        try:
+            edit_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+            res = requests.get(edit_url, headers=headers_req, timeout=10)
+            if res.status_code == 200:
+                html = res.text
+                match = re.search(r'bootstrapData\s*=\s*({.+?});', html)
+                if not match:
+                    match = re.search(r'var\s+bootstrapData\s*=\s*({.+?});', html)
+                if match:
+                    bdata = json.loads(match.group(1))
+                    topsnapshot = bdata.get('changes', {}).get('topsnapshot', [])
+                    for item in topsnapshot:
+                        if isinstance(item, list) and len(item) >= 2:
+                            payload_str = item[1]
+                            if isinstance(payload_str, str) and payload_str.startswith('['):
+                                inner = json.loads(payload_str)
+                                if isinstance(inner, list) and len(inner) >= 4:
+                                    s_gid = str(inner[2])
+                                    props_list = inner[3]
+                                    if isinstance(props_list, list) and len(props_list) > 0:
+                                        p_dict = props_list[0]
+                                        if isinstance(p_dict, dict) and '1' in p_dict:
+                                            tb = p_dict['1']
+                                            if isinstance(tb, list) and len(tb) > 0 and len(tb[0]) >= 3:
+                                                s_title = tb[0][2]
+                                                sheets_list.append({"name": s_title, "gid": s_gid, "rows": total_rows})
+        except Exception as se:
+            print(f"[VIEW SHEET META] Sheet tabs extraction failed: {se}", flush=True)
+
+        if not sheets_list:
+            sheets_list = [{"name": f"Sheet FY {fy}", "gid": gid or "0", "rows": total_rows}]
+
+        response = jsonify({
+            'success': True,
+            'spreadsheetId': sid,
+            'sheets': sheets_list,
+            'totalRows': total_rows
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+
+    # Handle action: getData
+    if action == 'getData':
+        try:
+            from_row = int(args.get('fromRow') or data.get('fromRow') or 1)
+            to_row = int(args.get('toRow') or data.get('toRow') or 52)
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A{from_row}:ZZ{to_row}"
+            r = requests.get(csv_url, headers=headers_req, timeout=12)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalRows': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = []
+            data_rows = []
+
+            if from_row == 1:
+                headers = parsed[0]
+                data_rows = parsed[1:]
+            else:
+                data_rows = parsed
+                try:
+                    h_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ1"
+                    hr = requests.get(h_url, headers=headers_req, timeout=8)
+                    if hr.status_code == 200:
+                        h_parsed = list(csv.reader(io.StringIO(hr.text)))
+                        if h_parsed:
+                            headers = h_parsed[0]
+                except Exception:
+                    pass
+
+            num_cols = len(headers) if headers else (len(data_rows[0]) if data_rows else 0)
+            if num_cols > 0:
+                for row_item in data_rows:
+                    if len(row_item) < num_cols:
+                        row_item.extend([''] * (num_cols - len(row_item)))
+
+            total_rows = int(args.get('totalRows') or data.get('totalRows') or 0)
+            if total_rows <= 0:
+                try:
+                    count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+                    cr = requests.get(count_url, headers=headers_req, timeout=6)
+                    if cr.status_code == 200:
+                        c_reader = list(csv.reader(io.StringIO(cr.text)))
+                        if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                            total_rows = int(float(c_reader[1][0]))
+                except Exception:
+                    total_rows = len(data_rows)
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers] if headers else [],
+                'data': data_rows,
+                'totalRows': total_rows
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as de:
+            traceback.print_exc()
+            response = jsonify({'success': False, 'error': str(de)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    # Handle action: search
+    if action == 'search':
+        try:
+            if not query:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ5000"
+            r = requests.get(csv_url, headers=headers_req, timeout=15)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = parsed[0]
+            q_lower = query.lower()
+            matched = []
+            for r_item in parsed[1:]:
+                if any(q_lower in str(cell).lower() for cell in r_item):
+                    if len(r_item) < len(headers):
+                        r_item.extend([''] * (len(headers) - len(r_item)))
+                    matched.append(r_item)
+                    if len(matched) >= 200:
+                        break
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers],
+                'data': matched,
+                'totalMatches': len(matched),
+                'limited': len(matched) >= 200
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as se:
+            response = jsonify({'success': False, 'error': str(se)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    response = jsonify({'success': False, 'error': f'Unknown action {action}'})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response, 400
 @app.route('/api/force-refresh-cache', methods=['POST', 'GET', 'OPTIONS'])
 def force_refresh_cache():
     if request.method == 'OPTIONS':
@@ -3586,6 +4025,193 @@ def lookup_purchase_quantities():
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
 
+
+
+    # Auto-persist sheet_url in fy_settings if missing
+    try:
+        urls, current_sheet_urls = load_fy_all_settings()
+        if fy not in current_sheet_urls or current_sheet_urls[fy] != sheet_url:
+            current_sheet_urls[fy] = sheet_url
+            save_fy_settings_file(urls, current_sheet_urls)
+    except Exception:
+        pass
+
+    headers_req = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # Handle action: getMetadata
+    if action == 'getMetadata':
+        total_rows = 0
+        try:
+            count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+            r = requests.get(count_url, headers=headers_req, timeout=10)
+            if r.status_code == 200:
+                c_reader = list(csv.reader(io.StringIO(r.text)))
+                if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                    total_rows = int(float(c_reader[1][0]))
+        except Exception as ce:
+            print(f"[VIEW SHEET META] Count query failed: {ce}", flush=True)
+
+        sheets_list = []
+        try:
+            edit_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+            res = requests.get(edit_url, headers=headers_req, timeout=10)
+            if res.status_code == 200:
+                html = res.text
+                match = re.search(r'bootstrapData\s*=\s*({.+?});', html)
+                if not match:
+                    match = re.search(r'var\s+bootstrapData\s*=\s*({.+?});', html)
+                if match:
+                    bdata = json.loads(match.group(1))
+                    topsnapshot = bdata.get('changes', {}).get('topsnapshot', [])
+                    for item in topsnapshot:
+                        if isinstance(item, list) and len(item) >= 2:
+                            payload_str = item[1]
+                            if isinstance(payload_str, str) and payload_str.startswith('['):
+                                inner = json.loads(payload_str)
+                                if isinstance(inner, list) and len(inner) >= 4:
+                                    s_gid = str(inner[2])
+                                    props_list = inner[3]
+                                    if isinstance(props_list, list) and len(props_list) > 0:
+                                        p_dict = props_list[0]
+                                        if isinstance(p_dict, dict) and '1' in p_dict:
+                                            tb = p_dict['1']
+                                            if isinstance(tb, list) and len(tb) > 0 and len(tb[0]) >= 3:
+                                                s_title = tb[0][2]
+                                                sheets_list.append({"name": s_title, "gid": s_gid, "rows": total_rows})
+        except Exception as se:
+            print(f"[VIEW SHEET META] Sheet tabs extraction failed: {se}", flush=True)
+
+        if not sheets_list:
+            sheets_list = [{"name": f"Sheet FY {fy}", "gid": gid or "0", "rows": total_rows}]
+
+        response = jsonify({
+            'success': True,
+            'spreadsheetId': sid,
+            'sheets': sheets_list,
+            'totalRows': total_rows
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+
+    # Handle action: getData
+    if action == 'getData':
+        try:
+            from_row = int(args.get('fromRow') or data.get('fromRow') or 1)
+            to_row = int(args.get('toRow') or data.get('toRow') or 52)
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A{from_row}:ZZ{to_row}"
+            r = requests.get(csv_url, headers=headers_req, timeout=12)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalRows': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = []
+            data_rows = []
+
+            if from_row == 1:
+                headers = parsed[0]
+                data_rows = parsed[1:]
+            else:
+                data_rows = parsed
+                try:
+                    h_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ1"
+                    hr = requests.get(h_url, headers=headers_req, timeout=8)
+                    if hr.status_code == 200:
+                        h_parsed = list(csv.reader(io.StringIO(hr.text)))
+                        if h_parsed:
+                            headers = h_parsed[0]
+                except Exception:
+                    pass
+
+            num_cols = len(headers) if headers else (len(data_rows[0]) if data_rows else 0)
+            if num_cols > 0:
+                for row_item in data_rows:
+                    if len(row_item) < num_cols:
+                        row_item.extend([''] * (num_cols - len(row_item)))
+
+            total_rows = int(args.get('totalRows') or data.get('totalRows') or 0)
+            if total_rows <= 0:
+                try:
+                    count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+                    cr = requests.get(count_url, headers=headers_req, timeout=6)
+                    if cr.status_code == 200:
+                        c_reader = list(csv.reader(io.StringIO(cr.text)))
+                        if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                            total_rows = int(float(c_reader[1][0]))
+                except Exception:
+                    total_rows = len(data_rows)
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers] if headers else [],
+                'data': data_rows,
+                'totalRows': total_rows
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as de:
+            traceback.print_exc()
+            response = jsonify({'success': False, 'error': str(de)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    # Handle action: search
+    if action == 'search':
+        try:
+            if not query:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ5000"
+            r = requests.get(csv_url, headers=headers_req, timeout=15)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = parsed[0]
+            q_lower = query.lower()
+            matched = []
+            for r_item in parsed[1:]:
+                if any(q_lower in str(cell).lower() for cell in r_item):
+                    if len(r_item) < len(headers):
+                        r_item.extend([''] * (len(headers) - len(r_item)))
+                    matched.append(r_item)
+                    if len(matched) >= 200:
+                        break
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers],
+                'data': matched,
+                'totalMatches': len(matched),
+                'limited': len(matched) >= 200
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as se:
+            response = jsonify({'success': False, 'error': str(se)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    response = jsonify({'success': False, 'error': f'Unknown action {action}'})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response, 400
+
 @app.route('/api/get-available-sheets', methods=['GET', 'OPTIONS'])
 def get_available_sheets():
     if request.method == 'OPTIONS':
@@ -3623,7 +4249,7 @@ def get_available_sheets():
                 
         fy_urls = load_fy_settings()
         configured_years = list(fy_urls.keys())
-        years = sorted(list(set(years + configured_years)))
+        years = sorted(list(set(years + configured_years)), key=parse_fy_key)
         if not years:
             years = ["2025-26", "2026-27"] # Fallbacks if empty
 
@@ -3641,6 +4267,193 @@ def get_available_sheets():
         response = jsonify({"status": "Error", "message": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
+
+
+    # Auto-persist sheet_url in fy_settings if missing
+    try:
+        urls, current_sheet_urls = load_fy_all_settings()
+        if fy not in current_sheet_urls or current_sheet_urls[fy] != sheet_url:
+            current_sheet_urls[fy] = sheet_url
+            save_fy_settings_file(urls, current_sheet_urls)
+    except Exception:
+        pass
+
+    headers_req = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # Handle action: getMetadata
+    if action == 'getMetadata':
+        total_rows = 0
+        try:
+            count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+            r = requests.get(count_url, headers=headers_req, timeout=10)
+            if r.status_code == 200:
+                c_reader = list(csv.reader(io.StringIO(r.text)))
+                if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                    total_rows = int(float(c_reader[1][0]))
+        except Exception as ce:
+            print(f"[VIEW SHEET META] Count query failed: {ce}", flush=True)
+
+        sheets_list = []
+        try:
+            edit_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+            res = requests.get(edit_url, headers=headers_req, timeout=10)
+            if res.status_code == 200:
+                html = res.text
+                match = re.search(r'bootstrapData\s*=\s*({.+?});', html)
+                if not match:
+                    match = re.search(r'var\s+bootstrapData\s*=\s*({.+?});', html)
+                if match:
+                    bdata = json.loads(match.group(1))
+                    topsnapshot = bdata.get('changes', {}).get('topsnapshot', [])
+                    for item in topsnapshot:
+                        if isinstance(item, list) and len(item) >= 2:
+                            payload_str = item[1]
+                            if isinstance(payload_str, str) and payload_str.startswith('['):
+                                inner = json.loads(payload_str)
+                                if isinstance(inner, list) and len(inner) >= 4:
+                                    s_gid = str(inner[2])
+                                    props_list = inner[3]
+                                    if isinstance(props_list, list) and len(props_list) > 0:
+                                        p_dict = props_list[0]
+                                        if isinstance(p_dict, dict) and '1' in p_dict:
+                                            tb = p_dict['1']
+                                            if isinstance(tb, list) and len(tb) > 0 and len(tb[0]) >= 3:
+                                                s_title = tb[0][2]
+                                                sheets_list.append({"name": s_title, "gid": s_gid, "rows": total_rows})
+        except Exception as se:
+            print(f"[VIEW SHEET META] Sheet tabs extraction failed: {se}", flush=True)
+
+        if not sheets_list:
+            sheets_list = [{"name": f"Sheet FY {fy}", "gid": gid or "0", "rows": total_rows}]
+
+        response = jsonify({
+            'success': True,
+            'spreadsheetId': sid,
+            'sheets': sheets_list,
+            'totalRows': total_rows
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+
+    # Handle action: getData
+    if action == 'getData':
+        try:
+            from_row = int(args.get('fromRow') or data.get('fromRow') or 1)
+            to_row = int(args.get('toRow') or data.get('toRow') or 52)
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A{from_row}:ZZ{to_row}"
+            r = requests.get(csv_url, headers=headers_req, timeout=12)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalRows': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = []
+            data_rows = []
+
+            if from_row == 1:
+                headers = parsed[0]
+                data_rows = parsed[1:]
+            else:
+                data_rows = parsed
+                try:
+                    h_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ1"
+                    hr = requests.get(h_url, headers=headers_req, timeout=8)
+                    if hr.status_code == 200:
+                        h_parsed = list(csv.reader(io.StringIO(hr.text)))
+                        if h_parsed:
+                            headers = h_parsed[0]
+                except Exception:
+                    pass
+
+            num_cols = len(headers) if headers else (len(data_rows[0]) if data_rows else 0)
+            if num_cols > 0:
+                for row_item in data_rows:
+                    if len(row_item) < num_cols:
+                        row_item.extend([''] * (num_cols - len(row_item)))
+
+            total_rows = int(args.get('totalRows') or data.get('totalRows') or 0)
+            if total_rows <= 0:
+                try:
+                    count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+                    cr = requests.get(count_url, headers=headers_req, timeout=6)
+                    if cr.status_code == 200:
+                        c_reader = list(csv.reader(io.StringIO(cr.text)))
+                        if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                            total_rows = int(float(c_reader[1][0]))
+                except Exception:
+                    total_rows = len(data_rows)
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers] if headers else [],
+                'data': data_rows,
+                'totalRows': total_rows
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as de:
+            traceback.print_exc()
+            response = jsonify({'success': False, 'error': str(de)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    # Handle action: search
+    if action == 'search':
+        try:
+            if not query:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ5000"
+            r = requests.get(csv_url, headers=headers_req, timeout=15)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = parsed[0]
+            q_lower = query.lower()
+            matched = []
+            for r_item in parsed[1:]:
+                if any(q_lower in str(cell).lower() for cell in r_item):
+                    if len(r_item) < len(headers):
+                        r_item.extend([''] * (len(headers) - len(r_item)))
+                    matched.append(r_item)
+                    if len(matched) >= 200:
+                        break
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers],
+                'data': matched,
+                'totalMatches': len(matched),
+                'limited': len(matched) >= 200
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as se:
+            response = jsonify({'success': False, 'error': str(se)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    response = jsonify({'success': False, 'error': f'Unknown action {action}'})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response, 400
 
 
 @app.route('/api/export-returns', methods=['POST', 'OPTIONS'])
@@ -3925,6 +4738,193 @@ def export_returns():
         return response, 500
 
 
+
+    # Auto-persist sheet_url in fy_settings if missing
+    try:
+        urls, current_sheet_urls = load_fy_all_settings()
+        if fy not in current_sheet_urls or current_sheet_urls[fy] != sheet_url:
+            current_sheet_urls[fy] = sheet_url
+            save_fy_settings_file(urls, current_sheet_urls)
+    except Exception:
+        pass
+
+    headers_req = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # Handle action: getMetadata
+    if action == 'getMetadata':
+        total_rows = 0
+        try:
+            count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+            r = requests.get(count_url, headers=headers_req, timeout=10)
+            if r.status_code == 200:
+                c_reader = list(csv.reader(io.StringIO(r.text)))
+                if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                    total_rows = int(float(c_reader[1][0]))
+        except Exception as ce:
+            print(f"[VIEW SHEET META] Count query failed: {ce}", flush=True)
+
+        sheets_list = []
+        try:
+            edit_url = f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+            res = requests.get(edit_url, headers=headers_req, timeout=10)
+            if res.status_code == 200:
+                html = res.text
+                match = re.search(r'bootstrapData\s*=\s*({.+?});', html)
+                if not match:
+                    match = re.search(r'var\s+bootstrapData\s*=\s*({.+?});', html)
+                if match:
+                    bdata = json.loads(match.group(1))
+                    topsnapshot = bdata.get('changes', {}).get('topsnapshot', [])
+                    for item in topsnapshot:
+                        if isinstance(item, list) and len(item) >= 2:
+                            payload_str = item[1]
+                            if isinstance(payload_str, str) and payload_str.startswith('['):
+                                inner = json.loads(payload_str)
+                                if isinstance(inner, list) and len(inner) >= 4:
+                                    s_gid = str(inner[2])
+                                    props_list = inner[3]
+                                    if isinstance(props_list, list) and len(props_list) > 0:
+                                        p_dict = props_list[0]
+                                        if isinstance(p_dict, dict) and '1' in p_dict:
+                                            tb = p_dict['1']
+                                            if isinstance(tb, list) and len(tb) > 0 and len(tb[0]) >= 3:
+                                                s_title = tb[0][2]
+                                                sheets_list.append({"name": s_title, "gid": s_gid, "rows": total_rows})
+        except Exception as se:
+            print(f"[VIEW SHEET META] Sheet tabs extraction failed: {se}", flush=True)
+
+        if not sheets_list:
+            sheets_list = [{"name": f"Sheet FY {fy}", "gid": gid or "0", "rows": total_rows}]
+
+        response = jsonify({
+            'success': True,
+            'spreadsheetId': sid,
+            'sheets': sheets_list,
+            'totalRows': total_rows
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+
+    # Handle action: getData
+    if action == 'getData':
+        try:
+            from_row = int(args.get('fromRow') or data.get('fromRow') or 1)
+            to_row = int(args.get('toRow') or data.get('toRow') or 52)
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A{from_row}:ZZ{to_row}"
+            r = requests.get(csv_url, headers=headers_req, timeout=12)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalRows': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = []
+            data_rows = []
+
+            if from_row == 1:
+                headers = parsed[0]
+                data_rows = parsed[1:]
+            else:
+                data_rows = parsed
+                try:
+                    h_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ1"
+                    hr = requests.get(h_url, headers=headers_req, timeout=8)
+                    if hr.status_code == 200:
+                        h_parsed = list(csv.reader(io.StringIO(hr.text)))
+                        if h_parsed:
+                            headers = h_parsed[0]
+                except Exception:
+                    pass
+
+            num_cols = len(headers) if headers else (len(data_rows[0]) if data_rows else 0)
+            if num_cols > 0:
+                for row_item in data_rows:
+                    if len(row_item) < num_cols:
+                        row_item.extend([''] * (num_cols - len(row_item)))
+
+            total_rows = int(args.get('totalRows') or data.get('totalRows') or 0)
+            if total_rows <= 0:
+                try:
+                    count_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&tq=" + quote('select count(A)')
+                    cr = requests.get(count_url, headers=headers_req, timeout=6)
+                    if cr.status_code == 200:
+                        c_reader = list(csv.reader(io.StringIO(cr.text)))
+                        if len(c_reader) > 1 and len(c_reader[1]) > 0:
+                            total_rows = int(float(c_reader[1][0]))
+                except Exception:
+                    total_rows = len(data_rows)
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers] if headers else [],
+                'data': data_rows,
+                'totalRows': total_rows
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as de:
+            traceback.print_exc()
+            response = jsonify({'success': False, 'error': str(de)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    # Handle action: search
+    if action == 'search':
+        try:
+            if not query:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sid}/gviz/tq?tqx=out:csv&gid={gid}&range=A1:ZZ5000"
+            r = requests.get(csv_url, headers=headers_req, timeout=15)
+            if r.status_code != 200:
+                response = jsonify({'success': False, 'error': f'Google Sheets returned HTTP {r.status_code}'})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response, 500
+
+            parsed = list(csv.reader(io.StringIO(r.text)))
+            if not parsed:
+                response = jsonify({'success': True, 'headers': [], 'data': [], 'totalMatches': 0})
+                response.headers.add("Access-Control-Allow-Origin", "*")
+                return response
+
+            headers = parsed[0]
+            q_lower = query.lower()
+            matched = []
+            for r_item in parsed[1:]:
+                if any(q_lower in str(cell).lower() for cell in r_item):
+                    if len(r_item) < len(headers):
+                        r_item.extend([''] * (len(headers) - len(r_item)))
+                    matched.append(r_item)
+                    if len(matched) >= 200:
+                        break
+
+            response = jsonify({
+                'success': True,
+                'headers': [headers],
+                'data': matched,
+                'totalMatches': len(matched),
+                'limited': len(matched) >= 200
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response
+        except Exception as se:
+            response = jsonify({'success': False, 'error': str(se)})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 500
+
+    response = jsonify({'success': False, 'error': f'Unknown action {action}'})
+    response.headers.add("Access-Control-Allow-Origin", "*")
+    return response, 400
+
+
 @app.route('/api/export-returns-file', methods=['POST', 'OPTIONS'])
 def export_returns_file():
     if request.method == 'OPTIONS':
@@ -3962,7 +4962,7 @@ def export_returns_file():
             if m:
                 db_years.append(m.group(0))
         
-        all_avail_years = sorted(list(set(configured_years + db_years)))
+        all_avail_years = sorted(list(set(configured_years + db_years)), key=parse_fy_key)
         if not all_avail_years:
             all_avail_years = ["2025-26", "2026-27"]
             

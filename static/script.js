@@ -18,6 +18,8 @@ const DEFAULT_SHEET_URL_25_26 = 'https://docs.google.com/spreadsheets/d/1xXR4gfD
 
 const DEFAULT_SHEET_URL_26_27 = 'https://docs.google.com/spreadsheets/d/1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w/edit';
 
+const DEFAULT_SHEET_URL_26_27_1 = 'https://docs.google.com/spreadsheets/d/1wcnhQnTZruaVNDMJbg3ssCskDV-7WmKLDXX8Q6YgvU4/edit?usp=sharing';
+
 
 
 function getSavedFyUrls() {
@@ -84,6 +86,8 @@ function getSavedFySheetUrls() {
 
                 if (!parsed['2026-27']) parsed['2026-27'] = DEFAULT_SHEET_URL_26_27;
 
+                if (!parsed['2026-27-1']) parsed['2026-27-1'] = DEFAULT_SHEET_URL_26_27_1;
+
                 return parsed;
 
             }
@@ -96,7 +100,9 @@ function getSavedFySheetUrls() {
 
         '2025-26': DEFAULT_SHEET_URL_25_26,
 
-        '2026-27': DEFAULT_SHEET_URL_26_27
+        '2026-27': DEFAULT_SHEET_URL_26_27,
+
+        '2026-27-1': DEFAULT_SHEET_URL_26_27_1
 
     };
 
@@ -111,6 +117,254 @@ function saveFySheetUrls(sheetUrlsObj) {
         localStorage.setItem('sale_purchase_fy_sheet_urls', JSON.stringify(sheetUrlsObj));
 
     } catch(e) {}
+
+}
+
+
+
+function getSavedFyRowCounts() {
+
+    try {
+
+        const stored = localStorage.getItem('sale_purchase_fy_row_counts');
+
+        if (stored) {
+
+            const parsed = JSON.parse(stored);
+
+            if (parsed && typeof parsed === 'object') return parsed;
+
+        }
+
+    } catch(e) {}
+
+    return {};
+
+}
+
+
+
+function saveFyRowCounts(countsObj) {
+
+    try {
+
+        localStorage.setItem('sale_purchase_fy_row_counts', JSON.stringify(countsObj));
+
+    } catch(e) {}
+
+}
+
+
+
+function parseFYKey(k) {
+
+    if (!k) return [0, 0, 0];
+
+    const str = String(k).trim();
+
+    const m = str.match(/^(\d{4})-(\d{2,4})(?:-(\d+))?$/);
+
+    if (m) {
+
+        const startY = parseInt(m[1], 10);
+
+        const rawEnd = m[2];
+
+        const endY = rawEnd.length === 4 ? parseInt(rawEnd, 10) : parseInt(String(startY).slice(0, 2) + rawEnd, 10);
+
+        const part = m[3] ? parseInt(m[3], 10) : 0;
+
+        return [startY, endY, part];
+
+    }
+
+    const nums = (str.match(/\d+/g) || []).map(n => parseInt(n, 10));
+
+    return nums.length ? [...nums, 0] : [0, 0, 0];
+
+}
+
+
+
+function compareFYKeys(a, b) {
+
+    const pa = parseFYKey(a);
+
+    const pb = parseFYKey(b);
+
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+
+        const va = pa[i] !== undefined ? pa[i] : 0;
+
+        const vb = pb[i] !== undefined ? pb[i] : 0;
+
+        if (va !== vb) return va - vb;
+
+    }
+
+    return String(a).localeCompare(String(b));
+
+}
+
+
+
+function getAvailableFYKeys() {
+
+    const urls = getSavedFyUrls();
+
+    const sheetUrls = getSavedFySheetUrls();
+
+    const keys = Array.from(new Set([...Object.keys(urls), ...Object.keys(sheetUrls)]));
+
+    if (keys.length === 0) keys.push('2025-26', '2026-27', '2026-27-1');
+
+    keys.sort(compareFYKeys);
+
+    return keys;
+
+}
+
+
+
+function getLatestConfiguredFY() {
+
+    const keys = getAvailableFYKeys();
+
+    return keys[keys.length - 1] || '2026-27-1';
+
+}
+
+
+
+function getSheetCapacityStatus(rowCount) {
+
+    const count = parseInt(rowCount, 10) || 0;
+
+    if (count > 150000) {
+
+        return {
+
+            level: 'critical',
+
+            tier: 4,
+
+            isWarning: true,
+
+            isCritical: true,
+
+            badgeClass: 'capacity-badge-critical',
+
+            label: 'Red Alert (≥1.5L)',
+
+            shortText: '1.5L+ Full',
+
+            color: '#dc2626',
+
+            warningTitle: 'CRITICAL RED ALERT: Sheet Overload Limit Reached (≥ 1,50,000 Rows)',
+
+            warningDesc: 'This sheet has reached its maximum recommended capacity. Adding more data will cause Google Sheets to crash or fail. Please switch to a new FY sheet or create a new partition.'
+
+        };
+
+    }
+
+    if (count > 100000) {
+
+        return {
+
+            level: 'orange',
+
+            tier: 3,
+
+            isWarning: true,
+
+            isCritical: false,
+
+            badgeClass: 'capacity-badge-orange',
+
+            label: 'Orange Alert (1L - 1.5L)',
+
+            shortText: '1L+ Heavy',
+
+            color: '#ea580c',
+
+            warningTitle: 'HIGH CAPACITY WARNING: Approaching Limit (1,00,001 – 1,50,000 Rows)',
+
+            warningDesc: 'This sheet is nearing its maximum recommended capacity. Operations may experience lag. We strongly recommend creating a new partition sheet in Settings to maintain fast loading.'
+
+        };
+
+    }
+
+    if (count > 50000) {
+
+        return {
+
+            level: 'yellow',
+
+            tier: 2,
+
+            isWarning: false,
+
+            isCritical: false,
+
+            badgeClass: 'capacity-badge-yellow',
+
+            label: 'Yellow Alert (50K - 1L)',
+
+            shortText: '50K+ Active',
+
+            color: '#ca8a04',
+
+            warningTitle: 'MODERATE LOAD: Normal Sheet Capacity (50,001 – 1,00,000 Rows)',
+
+            warningDesc: 'Sheet capacity is within normal working limits. Operations remain stable, but monitor row volume as it continues to grow.'
+
+        };
+
+    }
+
+    return {
+
+        level: 'healthy',
+
+        tier: 1,
+
+        isWarning: false,
+
+        isCritical: false,
+
+        badgeClass: 'capacity-badge-healthy',
+
+        label: 'Green Alert (1 - 50K)',
+
+        shortText: 'Optimal',
+
+        color: '#059669',
+
+        warningTitle: 'OPTIMAL STATUS: Sheet Health is Healthy & Fast (1 – 50,000 Rows)',
+
+        warningDesc: 'This sheet is operating at peak speed and optimal capacity. Safe to add more Sale & Purchase data without any performance delay.'
+
+    };
+
+}
+
+
+
+function formatRowCount(num) {
+
+    const n = parseInt(num, 10) || 0;
+
+    if (n >= 100000) {
+
+        const lakh = (n / 100000).toFixed(n % 100000 === 0 ? 0 : 2);
+
+        return `${n.toLocaleString('en-IN')} (${lakh}L)`;
+
+    }
+
+    return n.toLocaleString('en-IN');
 
 }
 
@@ -134,6 +388,24 @@ function extractSpreadsheetId(urlOrId) {
 
 
 
+function extractGid(urlOrGid) {
+
+    if (!urlOrGid) return '0';
+
+    const str = String(urlOrGid).trim();
+
+    const match = str.match(/[#?&]gid=([0-9]+)/);
+
+    if (match) return match[1];
+
+    if (/^[0-9]+$/.test(str)) return str;
+
+    return '0';
+
+}
+
+
+
 function getSheetUrlForFY(fy) {
 
     const urls = getSavedFySheetUrls();
@@ -144,9 +416,17 @@ function getSheetUrlForFY(fy) {
 
     }
 
+    if (fy === '2026-27-1') return DEFAULT_SHEET_URL_26_27_1;
+
     if (fy === '2026-27') return DEFAULT_SHEET_URL_26_27;
 
-    return DEFAULT_SHEET_URL_25_26;
+    if (fy === '2025-26') return DEFAULT_SHEET_URL_25_26;
+
+    const latest = getLatestConfiguredFY();
+
+    if (urls[latest] && urls[latest].trim() !== '') return urls[latest].trim();
+
+    return DEFAULT_SHEET_URL_26_27_1;
 
 }
 
@@ -160,13 +440,17 @@ function getSpreadsheetIdForFY(fy) {
 
     if (extracted) return extracted;
 
-    if (state.spreadsheetIds && state.spreadsheetIds[fy]) {
+    if (state && state.spreadsheetIds && state.spreadsheetIds[fy]) {
 
         return state.spreadsheetIds[fy];
 
     }
 
-    return fy === '2026-27' ? '1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w' : '1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To';
+    if (fy === '2026-27-1') return '1wcnhQnTZruaVNDMJbg3ssCskDV-7WmKLDXX8Q6YgvU4';
+
+    if (fy === '2026-27') return '1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w';
+
+    return '1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To';
 
 }
 
@@ -193,6 +477,15 @@ async function fetchFySettingsFromServer() {
             saveFyUrls(mergedUrls);
 
             saveFySheetUrls(mergedSheetUrls);
+
+            // Dynamically set default to latest sheet on app launch / login
+            const serverLatest = data.latest_fy || getLatestConfiguredFY();
+            const userManual = sessionStorage.getItem('user_switched_fy');
+            if (!userManual && serverLatest && state.currentFY !== serverLatest) {
+                state.currentFY = serverLatest;
+                const label = document.getElementById('fy-dropdown-label');
+                if (label) label.textContent = `FY ${state.currentFY}`;
+            }
 
             populateFYSelector();
 
@@ -250,7 +543,15 @@ const state = {
 
     currentTab: 'sale',
 
-    currentFY: '2026-27',
+    currentFY: (function() {
+        try {
+            const userManual = sessionStorage.getItem('user_switched_fy');
+            if (userManual) return userManual;
+            return getLatestConfiguredFY();
+        } catch(e) {
+            return '2026-27-1';
+        }
+    })(),
 
     saleOffset: 0, purchaseOffset: 0,
 
@@ -262,7 +563,9 @@ const state = {
 
         '2025-26': '1xXR4gfDPN-0A1B8gaY7kcW52gr4uRjfJ-TmafuJr6To',
 
-        '2026-27': '1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w'
+        '2026-27': '1AvlkDSR_zA3Vov2PGNLnZC6NDqM_-3On52ncpLf6d6w',
+
+        '2026-27-1': '1wcnhQnTZruaVNDMJbg3ssCskDV-7WmKLDXX8Q6YgvU4'
 
     },
 
@@ -276,7 +579,9 @@ const state = {
 
     viewerHeaders: [], viewerRows: [], viewerAllRows: [],
 
-    viewerStartRow: 3, viewerPageSize: 25, viewerTotalRows: 0,
+    viewerStartRow: 3, viewerPageSize: 50, viewerTotalRows: 0,
+
+    fyRowCounts: getSavedFyRowCounts(),
 
     searchTimer: null, searchToken: 0,
 
@@ -1098,25 +1403,89 @@ function populateFYSelector() {
 
     const label = document.getElementById('fy-dropdown-label');
 
+    const dot = document.getElementById('active-fy-indicator-dot');
+
+    const btn = document.getElementById('fy-dropdown-btn');
+
     if (!menu) return;
 
-    const urls = getSavedFyUrls();
 
-    const sheetUrls = getSavedFySheetUrls();
 
-    const keys = Array.from(new Set([...Object.keys(urls), ...Object.keys(sheetUrls)])).sort();
+    const keys = getAvailableFYKeys();
+
+    if (!state.currentFY || !keys.includes(state.currentFY)) {
+        state.currentFY = getLatestConfiguredFY();
+    }
 
     menu.innerHTML = '';
+
+
+
+    const headerEl = document.createElement('div');
+
+    headerEl.className = 'fy-dropdown-header';
+
+    headerEl.innerHTML = `<span>Select FY Sheet</span><span>Capacity / Rows</span>`;
+
+    menu.appendChild(headerEl);
+
+
 
     keys.forEach(fy => {
 
         const isActive = fy === state.currentFY;
 
+        const rowCount = state.fyRowCounts[fy] || 0;
+
+        const cap = getSheetCapacityStatus(rowCount);
+
+        const percent = Math.min(100, Math.round((rowCount / 150000) * 100));
+
+
+
         const item = document.createElement('div');
 
         item.className = 'fy-dropdown-item' + (isActive ? ' active' : '');
 
-        item.innerHTML = `<span class="fy-check">${isActive ? '✓' : ''}</span> FY ${fy}`;
+        
+
+        const countBadge = rowCount > 0 ? `<span class="fy-row-count-badge">${formatRowCount(rowCount)}</span>` : '';
+
+
+
+        item.innerHTML = `
+
+            <div class="fy-dropdown-row">
+
+                <div class="fy-dropdown-title-group">
+
+                    <span class="fy-check">${isActive ? '✓' : ''}</span>
+
+                    <span class="fy-dropdown-name">FY ${esc(fy)}</span>
+
+                </div>
+
+                <div class="fy-meta-group">
+
+                    ${countBadge}
+
+                    <span class="fy-status-pill ${cap.level}">${esc(cap.shortText)}</span>
+
+                </div>
+
+            </div>
+
+            ${rowCount > 0 ? `
+
+            <div class="fy-progress-track" title="${formatNumber(rowCount)} / 1,50,000 rows (${percent}%)">
+
+                <div class="fy-progress-fill ${cap.level}" style="width: ${Math.max(3, percent)}%;"></div>
+
+            </div>` : ''}
+
+        `;
+
+
 
         item.onclick = () => {
 
@@ -1130,7 +1499,261 @@ function populateFYSelector() {
 
     });
 
+
+
     if (label) label.textContent = `FY ${state.currentFY}`;
+
+
+
+    const activeCount = state.fyRowCounts[state.currentFY] || state.viewerTotalRows || 0;
+
+    const activeCap = getSheetCapacityStatus(activeCount);
+
+    if (dot) {
+
+        dot.className = `fy-indicator-dot ${activeCap.level}`;
+
+    }
+
+    if (btn) {
+
+        btn.classList.toggle('yellow-load', activeCap.level === 'yellow');
+
+        btn.classList.toggle('orange-load', activeCap.level === 'orange');
+
+        btn.classList.toggle('warning-load', activeCap.level === 'orange');
+
+        btn.classList.toggle('critical-load', activeCap.level === 'critical');
+
+    }
+
+}
+
+
+
+function updateCapacityIndicators(rowCount) {
+
+    const count = parseInt(rowCount, 10) || 0;
+
+    const cap = getSheetCapacityStatus(count);
+
+    const percent = Math.min(100, Math.round((count / 150000) * 100));
+
+
+
+    // 1. Update toolbar widget
+
+    const widget = document.getElementById('sheet-capacity-widget');
+
+    const widgetDot = document.getElementById('widget-capacity-dot');
+
+    const widgetText = document.getElementById('widget-capacity-text');
+
+    const widgetFill = document.getElementById('widget-capacity-fill');
+
+
+
+    if (widget) {
+
+        widget.classList.remove('hidden');
+
+        widget.className = `sheet-capacity-widget ${cap.level}`;
+
+        if (widgetDot) widgetDot.className = `fy-indicator-dot ${cap.level}`;
+
+        if (widgetText) {
+
+            widgetText.innerHTML = `<strong>${formatNumber(count)}</strong> / 1.5L (${percent}%)`;
+
+        }
+
+        if (widgetFill) {
+
+            widgetFill.className = `widget-meter-fill ${cap.level}`;
+
+            widgetFill.style.width = `${Math.max(4, percent)}%`;
+
+        }
+
+    }
+
+
+
+    // 2. Update Alert Banner above table (Always active for all 4 tiers: Green, Yellow, Orange, Red)
+
+    const banner = document.getElementById('sheet-capacity-alert');
+
+    const bannerIcon = document.getElementById('capacity-banner-icon');
+
+    const bannerTitle = document.getElementById('capacity-banner-title');
+
+    const bannerDesc = document.getElementById('capacity-banner-desc');
+
+
+
+    if (banner) {
+
+        banner.classList.remove('hidden');
+
+        banner.className = `sheet-capacity-banner ${cap.level}`;
+
+        if (bannerTitle) bannerTitle.textContent = cap.warningTitle;
+
+        if (bannerDesc) bannerDesc.innerHTML = `${cap.warningDesc} (Current Load: <strong>${formatRowCount(count)}</strong>)`;
+
+        if (bannerIcon) {
+
+            if (cap.level === 'critical') {
+
+                bannerIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+
+            } else if (cap.level === 'orange') {
+
+                bannerIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
+
+            } else if (cap.level === 'yellow') {
+
+                bannerIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+
+            } else {
+
+                bannerIcon.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>`;
+
+            }
+
+        }
+
+    }
+
+}
+
+
+
+async function fetchAllFYRowCounts() {
+
+    try {
+
+        const urls = getSavedFyUrls();
+
+        const sheetUrls = getSavedFySheetUrls();
+
+        const fyKeys = Array.from(new Set([...Object.keys(urls), ...Object.keys(sheetUrls)]));
+
+        if (fyKeys.length === 0) return;
+
+
+
+        const promises = fyKeys.map(async (fy) => {
+
+            const sheetUrl = sheetUrls[fy] || '';
+
+            const appUrl = urls[fy] || '';
+
+            try {
+
+                // 1. Check directly via server proxy
+
+                const controller = new AbortController();
+
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+                const res = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}`, { signal: controller.signal });
+
+                clearTimeout(timeoutId);
+
+                if (res.ok) {
+
+                    const r = await res.json();
+
+                    if (r && r.success && r.totalRows !== undefined) {
+
+                        return { fy, maxRows: r.totalRows };
+
+                    }
+
+                }
+
+            } catch (err) {}
+
+
+
+            // 2. Fallback to Apps Script if available
+
+            if (appUrl && appUrl.trim()) {
+
+                try {
+
+                    const controller = new AbortController();
+
+                    const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+                    const res = await fetch(`${appUrl.trim()}?action=getSheetNames`, { signal: controller.signal });
+
+                    clearTimeout(timeoutId);
+
+                    const r = await res.json();
+
+                    if (r && r.success && Array.isArray(r.sheets)) {
+
+                        let maxRows = 0;
+
+                        r.sheets.forEach(sh => {
+
+                            const count = parseInt(sh.rows, 10) || 0;
+
+                            if (count > maxRows) maxRows = count;
+
+                        });
+
+                        return { fy, maxRows };
+
+                    }
+
+                } catch (asErr) {}
+
+            }
+
+            return null;
+
+        });
+
+
+
+        const results = await Promise.all(promises);
+
+        let updated = false;
+
+        results.forEach(res => {
+
+            if (res && res.fy) {
+
+                state.fyRowCounts[res.fy] = res.maxRows;
+
+                updated = true;
+
+            }
+
+        });
+
+
+
+        if (updated) {
+
+            saveFyRowCounts(state.fyRowCounts);
+
+            populateFYSelector();
+
+            const activeCount = state.fyRowCounts[state.currentFY] || state.viewerTotalRows || 0;
+
+            updateCapacityIndicators(activeCount);
+
+        }
+
+    } catch (e) {
+
+        console.warn('[Capacity Row Count Check Error]', e);
+
+    }
 
 }
 
@@ -1190,7 +1813,11 @@ document.addEventListener('click', (e) => {
 
 function switchFinancialYear(fy) {
 
-    if (!fy || fy === state.currentFY) return;
+    if (!fy) return;
+
+    try { sessionStorage.setItem('user_switched_fy', fy); } catch(e) {}
+
+    if (fy === state.currentFY) return;
 
     state.currentFY = fy;
 
@@ -1212,6 +1839,10 @@ function switchFinancialYear(fy) {
 
     populateFYSelector();
 
+    const knownCount = state.fyRowCounts[fy] || 0;
+
+    updateCapacityIndicators(knownCount);
+
     showToast('🔄', `Switched to FY ${fy}`);
 
     refreshSheetDropdown();
@@ -1220,9 +1851,11 @@ function switchFinancialYear(fy) {
 
 
 
-// Initialize FY selector on load
+// Initialize FY selector and background row counts check on load
 
 populateFYSelector();
+
+fetchAllFYRowCounts();
 
 
 
@@ -1232,11 +1865,61 @@ async function refreshSheetDropdown() {
 
     try {
 
-        const res = await fetch(`${getActiveWebAppUrl()}?action=getSheetNames`);
+        const fy = state.currentFY || '2026-27';
 
-        const r = await res.json();
+        const sheetUrl = getSheetUrlForFY(fy);
 
-        if (r.success) {
+        let r = null;
+
+
+
+        // 1. Direct Google Sheet Proxy via local server (no Apps Script required)
+
+        try {
+
+            const metaRes = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}`);
+
+            if (metaRes.ok) {
+
+                const metaData = await metaRes.json();
+
+                if (metaData && metaData.success) {
+
+                    r = metaData;
+
+                }
+
+            }
+
+        } catch (localErr) {
+
+            console.warn('[Direct Sheet Meta Error]', localErr);
+
+        }
+
+
+
+        // 2. Fallback to Apps Script if available and local direct proxy didn't return
+
+        if (!r && getActiveWebAppUrl()) {
+
+            try {
+
+                const res = await fetch(`${getActiveWebAppUrl()}?action=getSheetNames`);
+
+                if (res.ok) r = await res.json();
+
+            } catch (asErr) {
+
+                console.warn('[Apps Script Meta Error]', asErr);
+
+            }
+
+        }
+
+
+
+        if (r && r.success) {
 
             const sel = document.getElementById('sheet-select');
 
@@ -1260,13 +1943,45 @@ async function refreshSheetDropdown() {
 
             }
 
+            let fyMaxRows = 0;
+
             r.sheets.forEach(sh => {
 
-                const txt = `${sh.name} (${sh.rows} rows)`;
+                const rCount = parseInt(sh.rows, 10) || 0;
+
+                if (rCount > fyMaxRows) fyMaxRows = rCount;
+
+                const cap = getSheetCapacityStatus(rCount);
+
+                let capTag = '';
+
+                if (cap.isCritical) capTag = ' [RED ALERT]';
+
+                else if (cap.level === 'orange') capTag = ' [Orange Alert]';
+
+                else if (cap.level === 'yellow') capTag = ' [Yellow Alert]';
+
+                else capTag = ' [Optimal]';
+
+                const txt = `${sh.name} (${formatRowCount(rCount)})${capTag}`;
 
                 if(sel) { const o=document.createElement('option'); o.value=sh.name; o.textContent=txt; sel.appendChild(o); }
 
             });
+
+
+
+            if (fyMaxRows > 0) {
+
+                state.fyRowCounts[state.currentFY] = fyMaxRows;
+
+                saveFyRowCounts(state.fyRowCounts);
+
+                populateFYSelector();
+
+                updateCapacityIndicators(fyMaxRows);
+
+            }
 
 
 
@@ -1780,9 +2495,13 @@ async function downloadSelectedSheets() {
 
 function onSheetRowsChange() {
 
-    const v = parseInt(document.getElementById('sheet-rows-per-page').value);
+    const v = parseInt(document.getElementById('sheet-rows-per-page')?.value || '50', 10) || 50;
 
     state.viewerPageSize = v;
+
+    const footerSelect = document.getElementById('footer-rows-per-page');
+
+    if (footerSelect) footerSelect.value = String(v);
 
     if (document.getElementById('universal-search').value.trim()) runUniversalSearch();
 
@@ -1792,9 +2511,50 @@ function onSheetRowsChange() {
 
 
 
-// ─── Load Sheet Data (Instant Fast GViz Range with Apps Script Fallback) ───
+// ─── Fast RFC-4180 Compliant CSV Parser (Preserves All Data & Column Alignment) ───
+function parseCSVRows(csvText) {
+    if (!csvText) return [];
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+    const n = csvText.length;
+    for (let i = 0; i < n; i++) {
+        const c = csvText[i];
+        const next = (i + 1 < n) ? csvText[i + 1] : '';
+        if (c === '"') {
+            if (inQuotes && next === '"') {
+                field += '"';
+                i++;
+            } else {
+                inQuotes = !inQuotes;
+            }
+        } else if (c === ',' && !inQuotes) {
+            row.push(field);
+            field = '';
+        } else if ((c === '\r' || c === '\n') && !inQuotes) {
+            if (c === '\r' && next === '\n') i++;
+            row.push(field);
+            field = '';
+            if (row.length > 1 || (row.length === 1 && row[0] !== '')) {
+                rows.push(row);
+            }
+            row = [];
+        } else {
+            field += c;
+        }
+    }
+    if (field.length > 0 || row.length > 0) {
+        row.push(field);
+        if (row.length > 1 || (row.length === 1 && row[0] !== '')) {
+            rows.push(row);
+        }
+    }
+    return rows;
+}
 
-async function loadSheetData(startRow) {
+// ─── Load Sheet Data (Fast Range with Apps Script Fallback) ───
+async function loadSheetData(startRow, isRefresh = false) {
 
     if (!state.selectedSheet && state.availableSheets && state.availableSheets.length > 0) {
 
@@ -1840,11 +2600,15 @@ async function loadSheetData(startRow) {
 
     const limit = state.viewerPageSize || 25;
 
-    const curSheetObj = state.availableSheets.find(s => s.name === state.selectedSheet);
+    const fy = state.currentFY || '2026-27';
 
-    const curGid = (curSheetObj && curSheetObj.gid !== undefined) ? curSheetObj.gid : 0;
+    const sheetUrl = getSheetUrlForFY(fy);
 
-    const spreadsheetId = getSpreadsheetIdForFY(state.currentFY);
+    const curSheetObj = (state.availableSheets || []).find(s => s.name === state.selectedSheet);
+
+    const curGid = (curSheetObj && curSheetObj.gid !== undefined) ? curSheetObj.gid : (extractGid(sheetUrl) || 0);
+
+    const spreadsheetId = getSpreadsheetIdForFY(fy);
 
 
 
@@ -1862,105 +2626,69 @@ async function loadSheetData(startRow) {
 
         fromRow = 1; // Include Row 1 (header row)
 
-        toRow = 1 + limit + 1; // Row 27 for 25 data items (1..25)
+        toRow = 1 + limit; // 50 data items (Rows 2..51)
 
     } else {
 
-        fromRow = 2 + (p * limit) + 1; // e.g. Row 28 for Page 2 (26..50)
+        fromRow = 2 + (p * limit); // e.g. Row 52 for Page 2 (51..100)
 
-        toRow = fromRow + limit - 1;   // e.g. Row 52 for Page 2
+        toRow = fromRow + limit - 1;
 
     }
 
-    const rangeParam = `range=A${fromRow}:ZZ${toRow}`;
+
+
+    let loadSuccess = false;
 
 
 
-    let gvizSuccess = false;
+    // 1. Direct High-Precision Server Proxy (Uses Google Sheets CSV without Apps Script & preserves all text/IDs)
 
-    if (spreadsheetId) {
+    try {
 
-        try {
+        const refreshParam = isRefresh ? '&refresh=1' : '';
 
-            // Include gid & exact range for instant ~0.8s query execution without scanning 1.7L rows
+        const apiUrl = `/api/view-sheet-data?action=getData&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}&gid=${curGid}&fromRow=${fromRow}&toRow=${toRow}&totalRows=${state.viewerTotalRows || 0}${refreshParam}`;
 
-            const gvizUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:json&gid=${curGid}&${rangeParam}`;
+        const ctrl = new AbortController();
 
-            const ctrl = new AbortController();
+        const timeoutId = setTimeout(() => ctrl.abort(), 25000);
 
-            const timeoutId = setTimeout(() => ctrl.abort(), 12000);
+        const res = await fetch(apiUrl, { signal: ctrl.signal });
 
-            const res = await fetch(gvizUrl, { signal: ctrl.signal });
-
-            clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
 
 
-            if (res.ok) {
+        if (res.ok) {
 
-                const text = await res.text();
+            const r = await res.json();
 
-                const jsonStart = text.indexOf('{');
+            if (r && r.success && r.data) {
 
-                const jsonEnd = text.lastIndexOf('}');
+                hideGlobalLoader();
 
-                if (jsonStart !== -1 && jsonEnd !== -1) {
+                state.viewerHeaders = r.headers || [];
 
-                    const parsed = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+                state.viewerRows = r.data || [];
 
-                    if (parsed.status === 'ok' && parsed.table) {
+                state.viewerAllRows = r.data || [];
 
-                        const table = parsed.table;
+                if (r.totalRows > 0) state.viewerTotalRows = r.totalRows;
 
-                        const cols = (table.cols || []).map(c => c.label || c.id || '');
+                renderViewerTable();
 
-                        const rows = (table.rows || []).map(r => {
-
-                            return (r.c || []).map(cell => {
-
-                                if (!cell) return '';
-
-                                return cell.f !== undefined ? cell.f : (cell.v !== null ? cell.v : '');
-
-                            });
-
-                        });
-
-
-
-                        if (p === 0 || !state.viewerHeaders.length) {
-
-                            state.viewerHeaders = [cols];
-
-                        }
-
-
-
-                        const totalRows = curSheetObj ? Math.max(0, (curSheetObj.rows || 0) - 1) : (rows.length + (p * limit));
-
-
-
-                        hideGlobalLoader();
-
-                        state.viewerRows = rows;
-
-                        state.viewerAllRows = rows;
-
-                        state.viewerTotalRows = totalRows;
-
-                        renderViewerTable();
-
-                        gvizSuccess = true;
-
-                    }
-
-                }
+                loadSuccess = true;
 
             }
 
-        } catch(gvizErr) {
+        }
 
-            console.warn('[Fast Range GViz load failed, trying Apps Script fallback]', gvizErr);
+    } catch(directErr) {
+
+        if (directErr && directErr.name !== 'AbortError') {
+
+            console.log('[Direct Sheet Proxy notice, using Apps Script fallback]:', directErr.message || directErr);
 
         }
 
@@ -1968,7 +2696,9 @@ async function loadSheetData(startRow) {
 
 
 
-    if (!gvizSuccess) {
+    // 2. Fallback to Apps Script only if Direct Proxy did not succeed and Web App URL exists
+
+    if (!loadSuccess && getActiveWebAppUrl()) {
 
         try {
 
@@ -2076,7 +2806,7 @@ function renderViewerTable() {
 
 
 
-    const limit = state.viewerPageSize || 25;
+    const limit = state.viewerPageSize || 50;
 
     const p = Math.floor(Math.max(0, (state.viewerStartRow || 3) - 3) / limit);
 
@@ -2090,11 +2820,27 @@ function renderViewerTable() {
 
     tInfo.textContent = `Total: ${formatNumber(state.viewerTotalRows)} rows`;
 
+    if (state.viewerTotalRows > 0) {
+
+        updateCapacityIndicators(state.viewerTotalRows);
+
+        state.fyRowCounts[state.currentFY] = Math.max(state.fyRowCounts[state.currentFY] || 0, state.viewerTotalRows);
+
+        saveFyRowCounts(state.fyRowCounts);
+
+    }
+
 
 
     document.getElementById('prev-btn').disabled = (p === 0);
 
     document.getElementById('next-btn').disabled = (endItem >= state.viewerTotalRows || state.viewerRows.length === 0);
+
+
+
+    // Render bottom pagination controls
+
+    renderFooterPagination();
 
 }
 
@@ -2116,19 +2862,333 @@ function renderViewerSearchResults(totalMatches, returnedRows, limited) {
 
     const total = formatNumber(totalMatches || 0);
 
-    document.getElementById('viewer-total-info').textContent = limited
+    const searchMsg = limited
 
-        ? `Search: showing ${shown} of ${total} matches`
+        ? `Search: showing <strong>${shown}</strong> of <strong>${total}</strong> matches`
 
-        : `Search: ${total} match${totalMatches !== 1 ? 'es' : ''} found`;
+        : `Search: <strong>${total}</strong> match${totalMatches !== 1 ? 'es' : ''} found`;
+
+    
+
+    const infoEl = document.getElementById('footer-entries-info');
+
+    if (infoEl) infoEl.innerHTML = searchMsg;
+
+    document.getElementById('viewer-total-info').innerHTML = searchMsg;
 
 }
 
 
 
+function goToPage(pageNum) {
+
+    const limit = state.viewerPageSize || 50;
+
+    const totalRows = state.viewerTotalRows || 0;
+
+    const totalPages = Math.max(1, Math.ceil(totalRows / limit));
+
+    let targetPage = parseInt(pageNum, 10);
+
+    if (isNaN(targetPage) || targetPage < 1) targetPage = 1;
+
+    if (targetPage > totalPages) targetPage = totalPages;
+
+
+
+    const nextStartRow = 3 + ((targetPage - 1) * limit);
+
+    const searchInput = document.getElementById('universal-search');
+
+    if (searchInput) searchInput.value = '';
+
+    loadSheetData(nextStartRow);
+
+}
+
+
+
+function getPageNumbersList(current, total) {
+
+    if (total <= 7) {
+
+        const pages = [];
+
+        for (let i = 1; i <= total; i++) pages.push(i);
+
+        return pages;
+
+    }
+
+    if (current <= 4) {
+
+        return [1, 2, 3, 4, 5, '...', total];
+
+    }
+
+    if (current >= total - 3) {
+
+        return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
+
+    }
+
+    return [1, '...', current - 1, current, current + 1, '...', total];
+
+}
+
+
+
+function renderFooterPagination() {
+
+    const totalRows = state.viewerTotalRows || 0;
+
+    const limit = state.viewerPageSize || 50;
+
+    const totalPages = Math.max(1, Math.ceil(totalRows / limit));
+
+    const currentPage = Math.min(totalPages, Math.floor(Math.max(0, (state.viewerStartRow || 3) - 3) / limit) + 1);
+
+
+
+    // 1. Update entries info on left (e.g. "Showing 1 to 50 of 3,021 entries")
+
+    const infoEl = document.getElementById('footer-entries-info');
+
+    if (infoEl) {
+
+        if (totalRows === 0) {
+
+            infoEl.textContent = 'Showing 0 to 0 of 0 entries';
+
+        } else {
+
+            const startItem = (currentPage - 1) * limit + 1;
+
+            const endItem = Math.min(startItem + (state.viewerRows ? state.viewerRows.length : 0) - 1, totalRows);
+
+            infoEl.innerHTML = `Showing <strong>${formatNumber(startItem)}</strong> to <strong>${formatNumber(endItem)}</strong> of <strong>${formatNumber(totalRows)}</strong> entries`;
+
+        }
+
+    }
+
+
+
+    // 2. Sync entries select dropdowns
+
+    const footerSelect = document.getElementById('footer-rows-per-page');
+
+    if (footerSelect && footerSelect.value !== String(limit)) {
+
+        footerSelect.value = String(limit);
+
+    }
+
+    const topSelect = document.getElementById('sheet-rows-per-page');
+
+    if (topSelect && topSelect.value !== String(limit)) {
+
+        topSelect.value = String(limit);
+
+    }
+
+
+
+    // 3. Render page buttons: « ‹ 1 2 3 4 5 ... 61 › »
+
+    const container = document.getElementById('footer-pagination-pages');
+
+    if (!container) return;
+
+    container.innerHTML = '';
+
+
+
+    // First page button «
+
+    const firstBtn = document.createElement('button');
+
+    firstBtn.type = 'button';
+
+    firstBtn.className = 'footer-page-btn nav-btn';
+
+    firstBtn.title = 'First Page';
+
+    firstBtn.textContent = '«';
+
+    firstBtn.disabled = (currentPage === 1 || totalRows === 0);
+
+    firstBtn.onclick = () => goToPage(1);
+
+    container.appendChild(firstBtn);
+
+
+
+    // Prev page button ‹
+
+    const prevBtn = document.createElement('button');
+
+    prevBtn.type = 'button';
+
+    prevBtn.className = 'footer-page-btn nav-btn';
+
+    prevBtn.title = 'Previous Page';
+
+    prevBtn.textContent = '‹';
+
+    prevBtn.disabled = (currentPage === 1 || totalRows === 0);
+
+    prevBtn.onclick = () => goToPage(currentPage - 1);
+
+    container.appendChild(prevBtn);
+
+
+
+    // Numbered pages algorithm
+
+    const pageNumbers = getPageNumbersList(currentPage, totalPages);
+
+    pageNumbers.forEach(p => {
+
+        if (p === '...') {
+
+            const dots = document.createElement('span');
+
+            dots.className = 'footer-page-ellipsis';
+
+            dots.textContent = '...';
+
+            container.appendChild(dots);
+
+        } else {
+
+            const pageBtn = document.createElement('button');
+
+            pageBtn.type = 'button';
+
+            pageBtn.className = 'footer-page-btn' + (p === currentPage ? ' active' : '');
+
+            pageBtn.textContent = String(p);
+
+            pageBtn.title = `Page ${p}`;
+
+            if (p === currentPage) {
+
+                pageBtn.setAttribute('aria-current', 'page');
+
+            } else {
+
+                pageBtn.onclick = () => goToPage(p);
+
+            }
+
+            container.appendChild(pageBtn);
+
+        }
+
+    });
+
+
+
+    // Next page button ›
+
+    const nextBtn = document.createElement('button');
+
+    nextBtn.type = 'button';
+
+    nextBtn.className = 'footer-page-btn nav-btn';
+
+    nextBtn.title = 'Next Page';
+
+    nextBtn.textContent = '›';
+
+    nextBtn.disabled = (currentPage === totalPages || totalRows === 0);
+
+    nextBtn.onclick = () => goToPage(currentPage + 1);
+
+    container.appendChild(nextBtn);
+
+
+
+    // Last page button »
+
+    const lastBtn = document.createElement('button');
+
+    lastBtn.type = 'button';
+
+    lastBtn.className = 'footer-page-btn nav-btn';
+
+    lastBtn.title = 'Last Page';
+
+    lastBtn.textContent = '»';
+
+    lastBtn.disabled = (currentPage === totalPages || totalRows === 0);
+
+    lastBtn.onclick = () => goToPage(totalPages);
+
+    container.appendChild(lastBtn);
+
+
+
+    // 4. Update Go to input placeholder / max
+
+    const gotoInput = document.getElementById('footer-goto-input');
+
+    if (gotoInput) {
+
+        gotoInput.max = totalPages;
+
+        gotoInput.value = currentPage;
+
+    }
+
+}
+
+
+
+function executeFooterGoTo() {
+
+    const input = document.getElementById('footer-goto-input');
+
+    if (!input) return;
+
+    const page = parseInt(input.value, 10);
+
+    if (!isNaN(page)) {
+
+        goToPage(page);
+
+    }
+
+}
+
+
+
+function onFooterRowsPerPageChange(val) {
+
+    const newLimit = parseInt(val, 10) || 50;
+
+    state.viewerPageSize = newLimit;
+
+    const topSelect = document.getElementById('sheet-rows-per-page');
+
+    if (topSelect) topSelect.value = String(newLimit);
+
+    state.viewerStartRow = 3;
+
+    loadSheetData(3);
+
+}
+
+
+
+
+
+
+
 function changePage(dir) {
 
-    const limit = state.viewerPageSize || 25;
+    const limit = state.viewerPageSize || 50;
 
     let p = Math.floor(Math.max(0, (state.viewerStartRow || 3) - 3) / limit);
 
@@ -2159,6 +3219,8 @@ function clearViewerTable() {
     document.getElementById('prev-btn').disabled=true;
 
     document.getElementById('next-btn').disabled=true;
+
+    renderFooterPagination();
 
 }
 
@@ -2214,19 +3276,59 @@ async function runUniversalSearch() {
 
     try {
 
-        const maxResults = 1000;
+        const fy = state.currentFY || '2026-27';
 
-        const url = `${getActiveWebAppUrl()}?action=searchSheetData&sheetName=${encodeURIComponent(state.selectedSheet)}&query=${encodeURIComponent(q)}&maxResults=${maxResults}`;
+        const sheetUrl = getSheetUrlForFY(fy);
 
-        const res = await fetch(url);
+        const curSheetObj = (state.availableSheets || []).find(s => s.name === state.selectedSheet);
 
-        const r = await res.json();
+        const curGid = (curSheetObj && curSheetObj.gid !== undefined) ? curSheetObj.gid : (extractGid(sheetUrl) || 0);
+
+
+
+        let r = null;
+
+        try {
+
+            const searchApiUrl = `/api/view-sheet-data?action=search&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}&gid=${curGid}&query=${encodeURIComponent(q)}`;
+
+            const res = await fetch(searchApiUrl);
+
+            if (res.ok) {
+
+                const searchData = await res.json();
+
+                if (searchData && searchData.success) r = searchData;
+
+            }
+
+        } catch (searchErr) {
+
+            console.warn('[Direct Search Proxy failed, trying fallback]', searchErr);
+
+        }
+
+
+
+        if (!r && getActiveWebAppUrl()) {
+
+            const maxResults = 1000;
+
+            const url = `${getActiveWebAppUrl()}?action=searchSheetData&sheetName=${encodeURIComponent(state.selectedSheet)}&query=${encodeURIComponent(q)}&maxResults=${maxResults}`;
+
+            const res = await fetch(url);
+
+            r = await res.json();
+
+        }
+
+
 
         if (token !== state.searchToken) return;
 
 
 
-        if (r.success) {
+        if (r && r.success) {
 
             state.viewerHeaders = r.headers || [];
 
@@ -2302,113 +3404,346 @@ if(syncBtn) syncBtn.addEventListener('click', openSyncModal);
 
 
 
-function openSyncModal() { document.getElementById('sync-modal-overlay').classList.remove('hidden'); refreshSyncDropdown(); }
+function openSyncModal() {
+    const overlay = document.getElementById('sync-modal-overlay');
+    if (overlay) overlay.classList.remove('hidden');
 
-function closeSyncModal() { document.getElementById('sync-modal-overlay').classList.add('hidden'); }
+    // 1. Immediately render known / cached sheets in 0ms!
+    const knownSheets = getKnownSyncSheets();
+    renderCustomSyncDropdown(knownSheets);
 
+    // 2. Silently update from network in background without freezing UI
+    refreshSyncDropdown(true);
+}
 
+function closeSyncModal() {
+    const overlay = document.getElementById('sync-modal-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    const menu = document.getElementById('custom-sync-menu');
+    if (menu) menu.classList.add('hidden');
+    const dropdown = document.getElementById('custom-sync-dropdown');
+    if (dropdown) dropdown.classList.remove('open');
+}
 
-async function refreshSyncDropdown() {
-
+function getKnownSyncSheets() {
     try {
+        const stored = localStorage.getItem('sale_purchase_cached_sync_sheets');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+    } catch (e) {}
 
-        const sel = document.getElementById('sync-sheet-select');
+    const sheetUrls = getSavedFySheetUrls();
+    const rowCounts = getSavedFyRowCounts();
+    const list = [];
+    const keys = getAvailableFYKeys();
+    keys.forEach(fy => {
+        const url = urls[fy];
+        if (!url || !url.trim()) return;
+        const rows = parseInt(rowCounts[fy] || '0', 10);
+        list.push({
+            fy: fy,
+            name: `AJ&MY&FK SALE-PURCHASE ${fy}`,
+            url: url.trim(),
+            rows: rows
+        });
+    });
+    return list;
+}
 
-        if (!sel) return;
+let _customSyncSheets = [];
 
-        const cur = sel.value;
+function renderCustomSyncDropdown(sheets, keepSelectedVal = null) {
+    _customSyncSheets = sheets || [];
+    const sel = document.getElementById('sync-sheet-select');
+    const listContainer = document.getElementById('custom-sync-options-list');
+    const badge = document.getElementById('sync-sheets-count-badge');
+    if (!sel || !listContainer) return;
 
-        sel.innerHTML = '<option value="">-- Loading target sheets... --</option>';
+    if (badge) {
+        badge.textContent = `${_customSyncSheets.length} Target${_customSyncSheets.length === 1 ? '' : 's'} Ready`;
+    }
 
+    // Determine current value to maintain
+    let selectedVal = keepSelectedVal || sel.value || '';
+    if (!selectedVal || !_customSyncSheets.some(s => s.name === selectedVal)) {
+        const currentFyMatch = _customSyncSheets.find(s => s.fy === state.currentFY);
+        selectedVal = currentFyMatch ? currentFyMatch.name : (_customSyncSheets[0]?.name || '');
+    }
 
+    // Populate hidden native select
+    let optionsHtml = '<option value="">-- Choose Target Sheet --</option>';
+    _customSyncSheets.forEach(sh => {
+        const rows = parseInt(sh.rows, 10) || 0;
+        optionsHtml += `<option value="${esc(sh.name)}" data-url="${esc(sh.url)}" data-fy="${esc(sh.fy)}" data-rows="${rows}">${esc(sh.name)}</option>`;
+    });
+    sel.innerHTML = optionsHtml;
+    sel.value = selectedVal;
+
+    // Render custom option cards
+    renderCustomOptionRows(_customSyncSheets, selectedVal);
+
+    // Update custom trigger UI
+    const chosen = _customSyncSheets.find(s => s.name === selectedVal) || _customSyncSheets[0];
+    if (chosen) {
+        updateCustomTriggerUI(chosen);
+        sel.value = chosen.name;
+    }
+
+    // Update the live capacity alert card
+    onSyncSheetSelected();
+}
+
+function renderCustomOptionRows(sheets, selectedVal) {
+    const listContainer = document.getElementById('custom-sync-options-list');
+    if (!listContainer) return;
+
+    if (!sheets || sheets.length === 0) {
+        listContainer.innerHTML = '<div style="padding:16px; text-align:center; color:#94a3b8; font-size:0.84rem;">No target sheets available</div>';
+        return;
+    }
+
+    listContainer.innerHTML = sheets.map(sh => {
+        const rows = parseInt(sh.rows, 10) || 0;
+        const cap = getSheetCapacityStatus(rows);
+        const isSelected = sh.name === selectedVal;
+        return `
+            <div class="custom-sync-option-row ${isSelected ? 'selected' : ''}" onclick="selectCustomSyncOption('${esc(sh.name)}', '${esc(sh.fy)}', '${esc(sh.url)}', ${rows})">
+                <div class="custom-sync-option-left">
+                    <span class="custom-sync-fy-tag">FY ${esc(sh.fy)}</span>
+                    <span class="custom-sync-option-name" title="${esc(sh.name)}">${esc(sh.name)}</span>
+                </div>
+                <div class="custom-sync-option-right">
+                    <span class="custom-sync-cap-pill ${cap.level}">
+                        <span class="fy-indicator-dot ${cap.level}"></span>
+                        ${formatRowCount(rows)}
+                    </span>
+                    ${isSelected ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function updateCustomTriggerUI(sh) {
+    const triggerContent = document.getElementById('custom-sync-trigger-content');
+    if (!triggerContent || !sh) return;
+    const rows = parseInt(sh.rows, 10) || 0;
+    const cap = getSheetCapacityStatus(rows);
+    triggerContent.innerHTML = `
+        <div class="custom-sync-trigger-selected">
+            <span class="custom-sync-fy-tag">FY ${esc(sh.fy)}</span>
+            <span class="custom-sync-sheet-name">${esc(sh.name)}</span>
+            <span class="custom-sync-cap-pill ${cap.level}">
+                <span class="fy-indicator-dot ${cap.level}"></span>
+                ${formatRowCount(rows)} • ${cap.label.split(' ')[0]}
+            </span>
+        </div>
+    `;
+}
+
+function toggleCustomSyncDropdown() {
+    const dropdown = document.getElementById('custom-sync-dropdown');
+    const menu = document.getElementById('custom-sync-menu');
+    if (!dropdown || !menu) return;
+    const isOpen = dropdown.classList.contains('open');
+    if (isOpen) {
+        dropdown.classList.remove('open');
+        menu.classList.add('hidden');
+    } else {
+        dropdown.classList.add('open');
+        menu.classList.remove('hidden');
+        const searchInput = document.getElementById('custom-sync-search-input');
+        if (searchInput) {
+            searchInput.value = '';
+            searchInput.focus();
+            renderCustomOptionRows(_customSyncSheets, document.getElementById('sync-sheet-select')?.value);
+        }
+    }
+}
+
+function selectCustomSyncOption(sheetName, fy, url, rows) {
+    const sel = document.getElementById('sync-sheet-select');
+    if (sel) {
+        sel.value = sheetName;
+        const opt = Array.from(sel.options).find(o => o.value === sheetName);
+        if (opt) {
+            opt.selected = true;
+            opt.dataset.rows = rows;
+            opt.dataset.url = url;
+            opt.dataset.fy = fy;
+        }
+    }
+    const chosen = _customSyncSheets.find(s => s.name === sheetName) || { name: sheetName, fy, url, rows };
+    updateCustomTriggerUI(chosen);
+
+    const dropdown = document.getElementById('custom-sync-dropdown');
+    const menu = document.getElementById('custom-sync-menu');
+    if (dropdown) dropdown.classList.remove('open');
+    if (menu) menu.classList.add('hidden');
+
+    onSyncSheetSelected();
+}
+
+function filterCustomSyncSheets(query) {
+    const q = (query || '').toLowerCase().trim();
+    const selVal = document.getElementById('sync-sheet-select')?.value || '';
+    if (!q) {
+        renderCustomOptionRows(_customSyncSheets, selVal);
+        return;
+    }
+    const filtered = _customSyncSheets.filter(s =>
+        (s.name && s.name.toLowerCase().includes(q)) ||
+        (s.fy && s.fy.toLowerCase().includes(q))
+    );
+    renderCustomOptionRows(filtered, selVal);
+}
+
+function selectSyncMode(mode) {
+    const radios = document.querySelectorAll('input[name="sync-mode"]');
+    radios.forEach(r => {
+        r.checked = (r.value === mode);
+    });
+    updateSyncModeUI();
+}
+
+function updateSyncModeUI() {
+    const appendCard = document.getElementById('sync-mode-append-label');
+    const overwriteCard = document.getElementById('sync-mode-overwrite-label');
+    const mode = document.querySelector('input[name="sync-mode"]:checked')?.value || 'append';
+    if (appendCard) appendCard.classList.toggle('active', mode === 'append');
+    if (overwriteCard) overwriteCard.classList.toggle('active', mode === 'overwrite');
+}
+
+async function refreshSyncDropdown(silent = false) {
+    try {
+        const badge = document.getElementById('sync-sheets-count-badge');
+        if (!silent && badge) badge.textContent = 'Updating...';
 
         const urls = getSavedFyUrls();
-
         const fyKeys = Object.keys(urls).sort();
-
-
-
-        let optionsHtml = '<option value="">-- Choose Target Sheet --</option>';
-
-
+        if (fyKeys.length === 0) return;
 
         const promises = fyKeys.map(async (fy) => {
-
             const url = urls[fy];
-
             if (!url || !url.trim()) return null;
-
             try {
-
                 const res = await fetch(`${url.trim()}?action=getSheetNames`);
-
                 const r = await res.json();
-
                 if (r.success && r.sheets) {
-
                     return { fy, url: url.trim(), sheets: r.sheets };
-
                 }
-
             } catch (err) {
-
                 console.warn(`Failed to fetch sheets for FY ${fy}:`, err);
-
             }
-
             return null;
-
         });
-
-
 
         const results = await Promise.all(promises);
-
-
+        const compiledSheets = [];
 
         results.forEach(resObj => {
-
             if (resObj && resObj.sheets) {
-
                 resObj.sheets.forEach(sh => {
-
-                    const label = `FY ${resObj.fy} ── ${sh.name} (${sh.rows} rows)`;
-
-                    optionsHtml += `<option value="${esc(sh.name)}" data-url="${esc(resObj.url)}" data-fy="${esc(resObj.fy)}">${esc(label)}</option>`;
-
+                    const rowCount = parseInt(sh.rows, 10) || 0;
+                    compiledSheets.push({
+                        fy: resObj.fy,
+                        url: resObj.url,
+                        name: sh.name,
+                        rows: rowCount
+                    });
                 });
-
             }
-
         });
 
-
-
-        sel.innerHTML = optionsHtml;
-
-
-
-        const allOpts = Array.from(sel.options);
-
-        const curMatch = allOpts.find(o => o.value === cur);
-
-        const fyMatch = allOpts.find(o => o.dataset?.fy === state.currentFY);
-
-        if (curMatch) {
-
-            sel.value = cur;
-
-        } else if (fyMatch) {
-
-            sel.value = fyMatch.value;
-
-        } else if (allOpts.length > 1) {
-
-            sel.value = allOpts[1].value;
-
+        if (compiledSheets.length > 0) {
+            localStorage.setItem('sale_purchase_cached_sync_sheets', JSON.stringify(compiledSheets));
+            const curVal = document.getElementById('sync-sheet-select')?.value;
+            renderCustomSyncDropdown(compiledSheets, curVal);
         }
+    } catch (e) {
+        console.error('Error refreshing sync dropdown:', e);
+    }
+}
 
-    } catch(e) { console.error(e); }
+function onSyncSheetSelected() {
+    const sel = document.getElementById('sync-sheet-select');
+    const alertBox = document.getElementById('sync-sheet-capacity-alert');
+    if (!sel || !alertBox) return;
+
+    const opt = sel.options[sel.selectedIndex];
+    if (!opt || !opt.value) {
+        alertBox.className = 'sync-capacity-card hidden';
+        alertBox.innerHTML = '';
+        return;
+    }
+
+    const rows = parseInt(opt.dataset?.rows || '0', 10);
+    const cap = getSheetCapacityStatus(rows);
+    const percent = Math.min(100, Math.round((rows / 150000) * 100));
+
+    alertBox.className = `sync-capacity-card ${cap.level}`;
+
+    let iconSvg = '';
+    if (cap.level === 'critical') {
+        iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 7.86 7.86 2"></polygon><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+    } else if (cap.level === 'orange') {
+        iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
+    } else if (cap.level === 'yellow') {
+        iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+    } else {
+        iconSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>`;
+    }
+
+    alertBox.innerHTML = `
+        <div class="sync-capacity-card-icon">
+            ${iconSvg}
+        </div>
+        <div class="sync-capacity-card-body">
+            <div class="sync-capacity-card-title">
+                <span>${esc(cap.warningTitle.split(':')[0])}</span>
+                <span style="font-size:0.75rem; font-weight:700;">${percent}%</span>
+            </div>
+            <div class="sync-capacity-card-sub">
+                Target Sheet Load: <strong>${formatRowCount(rows)}</strong> / 1.5 Lakh max recommended rows
+            </div>
+            <div class="sync-capacity-progress-track">
+                <div class="sync-capacity-progress-fill ${cap.level}" style="width: ${Math.max(4, percent)}%;"></div>
+            </div>
+            <p class="sync-capacity-card-advisory">${esc(cap.warningDesc)}</p>
+        </div>
+    `;
+}
+
+// Close custom sync dropdown on outside click
+document.addEventListener('click', function(e) {
+    const dropdown = document.getElementById('custom-sync-dropdown');
+    if (!dropdown) return;
+    if (!dropdown.contains(e.target)) {
+        dropdown.classList.remove('open');
+        const menu = document.getElementById('custom-sync-menu');
+        if (menu) menu.classList.add('hidden');
+    }
+});
+
+function closeCapacityConfirmModal() {
+
+    const modal = document.getElementById('capacity-confirm-modal-overlay');
+
+    if (modal) modal.classList.add('hidden');
+
+}
+
+
+
+function proceedSyncAnyway() {
+
+    closeCapacityConfirmModal();
+
+    window._overrideCapacitySync = true;
+
+    startSyncToGoogleSheets();
 
 }
 
@@ -2463,6 +3798,30 @@ async function startSyncToGoogleSheets() {
     const mode = document.querySelector('input[name="sync-mode"]:checked')?.value||'append';
 
     if (!sheetName) { showToast('⚠️', 'Select a target sheet'); return; }
+
+
+
+    const sheetRows = parseInt(selectedOpt?.dataset?.rows || '0', 10);
+
+    if (sheetRows >= 150000 && mode === 'append' && !window._overrideCapacitySync) {
+
+        const modal = document.getElementById('capacity-confirm-modal-overlay');
+
+        const msg = document.getElementById('capacity-confirm-msg');
+
+        if (modal && msg) {
+
+            msg.innerHTML = `Target sheet <strong>"${esc(sheetName)}"</strong> already contains <strong>${formatRowCount(sheetRows)}</strong> (≥ 1.5 Lakh limit).<br><br>Appending more records to this sheet may cause Google Sheets to freeze, slow down, or fail due to Google cell capacity limits.<br><br><strong>Recommendation:</strong> Click below to create a new partition sheet (e.g. FY 2026-27-1) instead.`;
+
+            modal.classList.remove('hidden');
+
+            return;
+
+        }
+
+    }
+
+    window._overrideCapacitySync = false;
 
 
 
@@ -2955,13 +4314,7 @@ function showActualSettingsModal() {
 
         const sheetUrls = getSavedFySheetUrls();
 
-        const allKeys = Array.from(new Set([...Object.keys(urls), ...Object.keys(sheetUrls)])).sort();
-
-        if (allKeys.length === 0) {
-
-            allKeys.push('2025-26', '2026-27');
-
-        }
+        const allKeys = getAvailableFYKeys();
 
 
 
@@ -3007,6 +4360,20 @@ function addFYSettingRowElement(fy = '', webAppUrl = '', sheetUrl = '') {
 
 
 
+    const rowCount = state.fyRowCounts[fy] || 0;
+
+    const cap = getSheetCapacityStatus(rowCount);
+
+    let badgeHtml = '';
+
+    if (rowCount > 0) {
+
+        badgeHtml = `<span class="fy-status-pill ${cap.level}">${formatRowCount(rowCount)} • ${cap.label}</span>`;
+
+    }
+
+
+
     const div = document.createElement('div');
 
     div.className = 'fy-setting-item';
@@ -3022,6 +4389,8 @@ function addFYSettingRowElement(fy = '', webAppUrl = '', sheetUrl = '') {
                 <label style="font-size:0.75rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Financial Year:</label>
 
                 <input type="text" class="fy-key-input compact-select" value="${esc(fy)}" placeholder="2026-27" style="font-weight:bold; width:110px; padding:4px 8px;">
+
+                ${badgeHtml}
 
             </div>
 
@@ -3068,6 +4437,70 @@ function addFYSettingRowElement(fy = '', webAppUrl = '', sheetUrl = '') {
 function addNewFYSettingRow() {
 
     addFYSettingRowElement('', '', '');
+
+}
+
+
+
+function addNewPartitionRow() {
+
+    const keys = getAvailableFYKeys();
+
+    let baseFY = state.currentFY || getLatestConfiguredFY();
+
+    let nextFY = '';
+
+    const match = baseFY.match(/^(.*?)_?(\d{4}-\d{2})(?:-(\d+))?$/);
+
+    if (match) {
+
+        const coreYears = match[2];
+
+        const currentPart = match[3] ? parseInt(match[3], 10) : 0;
+
+        let maxPart = currentPart;
+
+        keys.forEach(k => {
+
+            const km = k.match(new RegExp(`^${coreYears}(?:-(\\d+))?$`));
+
+            if (km) {
+
+                const p = km[1] ? parseInt(km[1], 10) : 0;
+
+                if (p > maxPart) maxPart = p;
+
+            }
+
+        });
+
+        nextFY = `${coreYears}-${maxPart + 1}`;
+
+    } else {
+
+        nextFY = `${baseFY}-1`;
+
+    }
+
+
+
+    addFYSettingRowElement(nextFY, '', '');
+
+    showToast('✨', `Added partition row: FY ${nextFY}`);
+
+
+
+    const container = document.getElementById('fy-url-settings-list');
+
+    if (container) {
+
+        container.scrollTop = container.scrollHeight;
+
+        const lastInput = container.querySelector('.fy-setting-item:last-child .fy-sheet-url-input');
+
+        if (lastInput) lastInput.focus();
+
+    }
 
 }
 
@@ -3123,6 +4556,14 @@ async function saveSettings() {
 
             if (data.sheet_urls) saveFySheetUrls(data.sheet_urls);
 
+            try { sessionStorage.removeItem('user_switched_fy'); } catch(e) {}
+
+            state.currentFY = (data && data.latest_fy) ? data.latest_fy : getLatestConfiguredFY();
+
+            const label = document.getElementById('fy-dropdown-label');
+
+            if (label) label.textContent = `FY ${state.currentFY}`;
+
         }
 
     } catch(e) {
@@ -3133,13 +4574,15 @@ async function saveSettings() {
 
     closeSettingsModal();
 
-    showToast('Settings Saved! Fast Viewer is active.', 'success');
+    showToast('Settings Saved! Switched to latest FY sheet.', 'success');
 
     populateFYSelector();
 
     refreshSheetDropdown();
 
     refreshSyncDropdown();
+
+    fetchAllFYRowCounts();
 
 }
 
@@ -3169,7 +4612,21 @@ Object.assign(window, {
 
     startSyncToGoogleSheets,
 
+    openSyncModal,
+
     closeSyncModal,
+
+    toggleCustomSyncDropdown,
+
+    selectCustomSyncOption,
+
+    filterCustomSyncSheets,
+
+    selectSyncMode,
+
+    updateSyncModeUI,
+
+    refreshSyncDropdown,
 
     confirmClearSheet,
 
@@ -3187,11 +4644,31 @@ Object.assign(window, {
 
     addNewFYSettingRow,
 
+    addNewPartitionRow,
+
     saveSettings,
 
     switchFinancialYear,
 
-    toggleFYDropdown
+    toggleFYDropdown,
+
+    closeCapacityConfirmModal,
+
+    proceedSyncAnyway,
+
+    onSyncSheetSelected,
+
+    updateCapacityIndicators,
+
+    fetchAllFYRowCounts,
+
+    goToPage,
+
+    renderFooterPagination,
+
+    executeFooterGoTo,
+
+    onFooterRowsPerPageChange
 
 });
 

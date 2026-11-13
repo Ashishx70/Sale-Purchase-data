@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=1.0.9">
+    <link rel="stylesheet" href="/static/style.css?v=1.3.1">
 </head>
 <body>
     <!-- Background Animation -->
@@ -168,7 +168,7 @@
                         <span>Export .xlsx</span>
                     </button>
 
-                    <button id="sync-sheet-btn" class="btn btn-sync btn-sm">
+                    <button id="sync-sheet-btn" class="btn btn-sync btn-sm" onclick="openSyncModal()">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
                             <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/>
                             <rect x="8" y="2" width="8" height="4" rx="1"/>
@@ -215,11 +215,19 @@
                     </span>
                     <div id="fy-dropdown" class="fy-dropdown" style="position:relative; display:inline-block;">
                         <button id="fy-dropdown-btn" class="fy-dropdown-btn" onclick="toggleFYDropdown()" type="button">
-                            <span id="fy-dropdown-label">FY 2026-27</span>
+                            <span class="fy-indicator-dot healthy" id="active-fy-indicator-dot"></span>
+                            <span id="fy-dropdown-label">FY 2026-27-1</span>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6,9 12,15 18,9"/></svg>
                         </button>
                         <div id="fy-dropdown-menu" class="fy-dropdown-menu hidden">
                             <!-- Dynamically populated -->
+                        </div>
+                    </div>
+                    <div id="sheet-capacity-widget" class="sheet-capacity-widget hidden" title="Sheet row load status">
+                        <span class="fy-indicator-dot healthy" id="widget-capacity-dot"></span>
+                        <span id="widget-capacity-text">0 / 1.5L rows</span>
+                        <div class="widget-meter-track">
+                            <div class="widget-meter-fill healthy" id="widget-capacity-fill" style="width: 0%;"></div>
                         </div>
                     </div>
                     <select id="sheet-select" class="compact-select" onchange="onSheetSelectionChange()" style="display:none;">
@@ -243,7 +251,7 @@
                         <option value="500">500</option>
                     </select>
 
-                    <button class="btn btn-sm" onclick="loadSheetData(3)" style="display:inline-flex; align-items:center; gap:6px; background:rgba(255, 255, 255, 0.65); border:1px solid rgba(203, 213, 225, 0.8); color:#334155; font-weight:700; border-radius:8px; padding:6px 12px; cursor:pointer; backdrop-filter:blur(8px); transition:all 0.2s;">
+                    <button class="btn btn-sm" onclick="loadSheetData(3, true)" style="display:inline-flex; align-items:center; gap:6px; background:rgba(255, 255, 255, 0.65); border:1px solid rgba(203, 213, 225, 0.8); color:#334155; font-weight:700; border-radius:8px; padding:6px 12px; cursor:pointer; backdrop-filter:blur(8px); transition:all 0.2s;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                         <span>Refresh</span>
                     </button>
@@ -260,11 +268,30 @@
                         <span>Clear</span>
                     </button>
 
-                    <div class="pagination-container">
+                    <div class="pagination-container" style="display: none;">
                         <button id="prev-btn" class="btn btn-secondary btn-sm" onclick="changePage(-1)" disabled>◀</button>
                         <span id="page-info" class="page-info-text">0 - 0</span>
                         <button id="next-btn" class="btn btn-secondary btn-sm" onclick="changePage(1)" disabled>▶</button>
                     </div>
+                </div>
+            </div>
+
+            <!-- ═══ SHEET ROW CAPACITY ALERT BANNER (1 Lakh Warning / 1.5 Lakh Red Alert) ═══ -->
+            <div id="sheet-capacity-alert" class="sheet-capacity-banner hidden">
+                <div class="capacity-banner-content">
+                    <div class="capacity-banner-icon" id="capacity-banner-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    </div>
+                    <div class="capacity-banner-text">
+                        <h4 id="capacity-banner-title">Sheet Capacity Alert</h4>
+                        <p id="capacity-banner-desc">Description</p>
+                    </div>
+                </div>
+                <div class="capacity-banner-actions">
+                    <button type="button" class="btn btn-sm" onclick="openSettingsModal()" style="display:inline-flex; align-items:center; gap:6px; background:rgba(255, 255, 255, 0.85); border:1px solid rgba(203, 213, 225, 0.9); color:#0f172a; font-weight:700; border-radius:8px; padding:6px 14px; cursor:pointer; backdrop-filter:blur(8px); transition:all 0.2s; box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        <span>+ New Partition Sheet</span>
+                    </button>
                 </div>
             </div>
 
@@ -278,9 +305,34 @@
                 <div class="sheet-tabs-bar" id="sheet-tabs-bar">
                     <!-- Dynamic sheet tabs like Excel go here -->
                 </div>
-                <div class="table-footer">
-                    <span id="viewer-total-info">Loading sheet data...</span>
+
+                <!-- ═══ ENTERPRISE BOTTOM PAGINATION (Exact design as requested) ═══ -->
+                <div class="table-footer-pagination" id="sheet-table-footer">
+                    <div class="footer-entries-info" id="footer-entries-info">
+                        Showing 0 to 0 of 0 entries
+                    </div>
+                    <div class="footer-pagination-controls">
+                        <div class="footer-per-page">
+                            <label for="footer-rows-per-page">Show</label>
+                            <select id="footer-rows-per-page" class="footer-select" onchange="onFooterRowsPerPageChange(this.value)">
+                                <option value="25">25</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                                <option value="500">500</option>
+                            </select>
+                            <span>entries</span>
+                        </div>
+                        <div class="footer-nav-group" id="footer-pagination-pages">
+                            <!-- Dynamically populated page buttons: « ‹ 1 2 3 4 5 ... 61 › » -->
+                        </div>
+                        <div class="footer-goto-group">
+                            <label for="footer-goto-input">Go to:</label>
+                            <input type="number" id="footer-goto-input" class="footer-goto-input" min="1" value="1" onkeydown="if(event.key==='Enter') executeFooterGoTo()">
+                            <button type="button" class="footer-goto-btn" onclick="executeFooterGoTo()">Go</button>
+                        </div>
+                    </div>
                 </div>
+                <span id="viewer-total-info" style="display:none;"></span>
             </div>
         </section>
 
@@ -345,39 +397,108 @@
 
     <!-- Sync to Google Sheets Modal -->
     <div id="sync-modal-overlay" class="modal-overlay hidden">
-        <div class="modal-card" style="width:440px;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-                <div style="width:36px; height:36px; border-radius:10px; background:rgba(99, 102, 241, 0.12); border:1px solid rgba(99, 102, 241, 0.3); color:#6366f1; display:flex; align-items:center; justify-content:center;">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>
+        <div class="modal-card sync-modal-card">
+            <!-- Modal Header -->
+            <div class="sync-modal-header">
+                <div class="sync-modal-header-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="16 16 12 12 8 16"></polyline>
+                        <line x1="12" y1="12" x2="12" y2="21"></line>
+                        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+                    </svg>
                 </div>
-                <h3 style="margin:0; font-size:1.15rem; font-weight:700; color:#0f172a;">Sync Data to Google Sheets</h3>
+                <div class="sync-modal-header-text">
+                    <h3>Sync Data to Google Sheets</h3>
+                    <p>Write verified Sale & Purchase records directly into your chosen Google Sheet partition.</p>
+                </div>
+                <button type="button" class="sync-modal-close-btn" onclick="closeSyncModal()" title="Close">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
             </div>
-            <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
-                This will write the processed Sale and Purchase records directly into your Google Sheet.
-            </p>
 
-            <div class="control-group" style="margin-bottom:12px; text-align:left;">
-                <label for="sync-sheet-select">Select Target Sheet</label>
-                <select id="sync-sheet-select" style="width:100%; padding:8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-glass); font-size:0.85rem;">
-                    <option value="">-- Loading sheets... --</option>
+            <!-- Target Sheet Custom Dropdown Section -->
+            <div class="sync-modal-section">
+                <div class="sync-section-title-row">
+                    <label class="sync-section-label">Select Target Sheet</label>
+                    <span id="sync-sheets-count-badge" class="sync-sheets-count-badge">Loading...</span>
+                </div>
+
+                <!-- Hidden native select preserved for robust backend & state dispatching -->
+                <select id="sync-sheet-select" onchange="onSyncSheetSelected()" style="display:none;">
+                    <option value="">-- Choose Target Sheet --</option>
                 </select>
+
+                <!-- Custom Interactive Dropdown -->
+                <div class="custom-sync-dropdown-container" id="custom-sync-dropdown">
+                    <!-- Dropdown Trigger Button -->
+                    <button type="button" class="custom-sync-dropdown-trigger" id="custom-sync-trigger" onclick="toggleCustomSyncDropdown()">
+                        <div class="custom-sync-trigger-content" id="custom-sync-trigger-content">
+                            <span class="custom-sync-trigger-placeholder">-- Select Target Sheet --</span>
+                        </div>
+                        <div class="custom-sync-trigger-chevron">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        </div>
+                    </button>
+
+                    <!-- Dropdown Menu / Option Cards Panel -->
+                    <div class="custom-sync-dropdown-menu hidden" id="custom-sync-menu">
+                        <div class="custom-sync-search-box">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <input type="text" id="custom-sync-search-input" placeholder="Search target sheets or FY..." oninput="filterCustomSyncSheets(this.value)">
+                            <button type="button" class="custom-sync-refresh-btn" onclick="refreshSyncDropdown(false)" title="Reload Sheet List">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                            </button>
+                        </div>
+                        <div class="custom-sync-options-list" id="custom-sync-options-list">
+                            <!-- Populated dynamically via JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ═══ LIVE SHEET CAPACITY ALERT BANNER (With Continuous Animated Icon!) ═══ -->
+                <div id="sync-sheet-capacity-alert" class="sync-capacity-card hidden">
+                    <!-- Populated dynamically with animated icon, status title, meter & advisory -->
+                </div>
             </div>
 
-            <div class="control-group" style="margin-bottom:16px; text-align:left;">
-                <label style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; font-weight:600; letter-spacing:0.05em; margin-bottom:4px;">Sync Mode</label>
-                <div style="display:flex; gap:16px; margin-top:6px; font-size:0.85rem;">
-                    <label style="display:flex; align-items:center; gap:6px; font-weight:normal; text-transform:none; cursor:pointer; color:var(--text-primary);">
-                        <input type="radio" name="sync-mode" value="append" checked> Append (Keep existing)
+            <!-- Sync Mode Selector -->
+            <div class="sync-modal-section">
+                <label class="sync-section-label" style="margin-bottom:8px;">Sync Mode</label>
+                <div class="sync-mode-grid">
+                    <label class="sync-mode-card active" id="sync-mode-append-label" onclick="selectSyncMode('append')">
+                        <input type="radio" name="sync-mode" value="append" checked onchange="updateSyncModeUI()">
+                        <div class="sync-mode-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        </div>
+                        <div class="sync-mode-info">
+                            <strong>Append Records</strong>
+                            <span>Adds new data to bottom (keeps existing sheet data intact)</span>
+                        </div>
                     </label>
-                    <label style="display:flex; align-items:center; gap:6px; font-weight:normal; text-transform:none; cursor:pointer; color:var(--text-primary);">
-                        <input type="radio" name="sync-mode" value="overwrite"> Overwrite (Fresh)
+
+                    <label class="sync-mode-card" id="sync-mode-overwrite-label" onclick="selectSyncMode('overwrite')">
+                        <input type="radio" name="sync-mode" value="overwrite" onchange="updateSyncModeUI()">
+                        <div class="sync-mode-icon overwrite">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
+                        </div>
+                        <div class="sync-mode-info">
+                            <strong>Overwrite Sheet</strong>
+                            <span>Replaces current sheet data with fresh verified records</span>
+                        </div>
                     </label>
                 </div>
             </div>
 
-            <div class="modal-actions">
-                <button id="start-sync-btn" class="btn btn-primary" onclick="startSyncToGoogleSheets()">Start Syncing</button>
-                <button type="button" class="btn btn-sm" onclick="closeSyncModal()" style="display:inline-flex; align-items:center; gap:6px; background:rgba(241, 245, 249, 0.85); border:1px solid rgba(203, 213, 225, 0.8); color:#475569; padding:8px 16px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg><span>Cancel</span></button>
+            <!-- Modal Actions Footer -->
+            <div class="sync-modal-footer">
+                <button type="button" class="btn sync-cancel-btn" onclick="closeSyncModal()">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    <span>Cancel</span>
+                </button>
+                <button id="start-sync-btn" class="btn sync-submit-btn" onclick="startSyncToGoogleSheets()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>
+                    <span>Start Syncing Now</span>
+                </button>
             </div>
         </div>
     </div>
@@ -500,13 +621,24 @@
                 <!-- FY rows dynamically loaded here -->
             </div>
 
-            <button type="button" class="btn btn-sm" onclick="addNewFYSettingRow()" style="margin-bottom:16px; width:100%; justify-content:center; display:inline-flex; align-items:center; gap:8px; background:rgba(99, 102, 241, 0.12); color:#6366f1; border:1px solid rgba(99, 102, 241, 0.32); padding:10px 16px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 2px 8px rgba(99, 102, 241, 0.1);">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                <span>Add New Financial Year URL</span>
-            </button>
+            <div style="display:flex; gap:10px; margin-bottom:16px;">
+                <button type="button" class="btn btn-sm" onclick="addNewFYSettingRow()" style="flex:1; justify-content:center; display:inline-flex; align-items:center; gap:8px; background:rgba(99, 102, 241, 0.12); color:#6366f1; border:1px solid rgba(99, 102, 241, 0.32); padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 2px 8px rgba(99, 102, 241, 0.1);">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    <span>Add Blank FY</span>
+                </button>
+                <button type="button" class="btn btn-sm" onclick="addNewPartitionRow()" style="flex:1.2; justify-content:center; display:inline-flex; align-items:center; gap:8px; background:rgba(16, 185, 129, 0.14); color:#047857; border:1px solid rgba(16, 185, 129, 0.35); padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-shadow:0 2px 8px rgba(16, 185, 129, 0.1);">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="12" y1="11" x2="12" y2="17"></line>
+                        <line x1="9" y1="14" x2="15" y2="14"></line>
+                    </svg>
+                    <span>+ New Partition (e.g. 2026-27-1)</span>
+                </button>
+            </div>
 
             <div class="modal-actions" style="display:flex; gap:10px; justify-content:flex-end;">
                 <button type="button" class="btn btn-sm" onclick="closeSettingsModal()" style="display:inline-flex; align-items:center; gap:8px; background:rgba(241, 245, 249, 0.85); border:1px solid rgba(203, 213, 225, 0.8); color:#475569; padding:9px 20px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:all 0.2s;">
@@ -527,6 +659,35 @@
             </div>
         </div>
     </div>
+
+    <!-- High Capacity Warning / Red Alert Sync Confirmation Modal -->
+    <div id="capacity-confirm-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-card" style="width: 480px; text-align: center; border-radius: 20px; padding: 26px; backdrop-filter: blur(16px); background: rgba(255, 255, 255, 0.94); border: 1px solid rgba(239, 68, 68, 0.45); box-shadow: 0 16px 40px rgba(239, 68, 68, 0.2);">
+            <div style="display:flex; justify-content:center; margin-bottom:14px;">
+                <div style="width:52px; height:52px; border-radius:14px; background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.4); color:#dc2626; display:flex; align-items:center; justify-content:center; animation: redAlertPulse 2s infinite;">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                </div>
+            </div>
+            <h3 style="margin:0 0 8px 0; font-size:1.25rem; font-weight:800; color:#991b1b;">Critical Sheet Capacity Notice</h3>
+            <p id="capacity-confirm-msg" style="font-size:0.87rem; color:#475569; line-height:1.5; margin-bottom:18px; text-align:left; background:rgba(254, 242, 242, 0.85); padding:12px 16px; border-radius:12px; border:1px solid rgba(254, 202, 202, 0.8);">
+                This target sheet already has over 1,50,000 rows. Appending more data can cause Google Sheets to crash or fail.
+            </p>
+            <div class="modal-actions" style="display:flex; gap:10px; justify-content:center;">
+                <button type="button" class="btn btn-sm" onclick="closeCapacityConfirmModal(); openSettingsModal();" style="flex:1.2; justify-content:center; display:inline-flex; align-items:center; gap:6px; background:rgba(99, 102, 241, 0.15); border:1px solid rgba(99, 102, 241, 0.35); color:#4f46e5; padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px);">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span>Create New Partition (Recommended)</span>
+                </button>
+                <button type="button" class="btn btn-sm" onclick="proceedSyncAnyway()" style="display:inline-flex; align-items:center; gap:6px; background:rgba(239, 68, 68, 0.12); border:1px solid rgba(239, 68, 68, 0.35); color:#dc2626; padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px);">
+                    <span>Proceed Anyway</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Custom Error Modal -->
     <div id="error-modal-overlay" class="modal-overlay hidden">
         <div class="modal-card" style="width: 460px; text-align: center; border-top: 5px solid var(--accent-danger, #ef4444); border-radius: var(--radius-lg); padding: 28px; box-shadow: var(--shadow-lg);">
@@ -786,7 +947,7 @@
                     }
 
                     checkList.innerHTML = '';
-                    const available = data.available_sheets || ['2026-27', '2025-26'];
+                    const available = data.available_sheets || ['2026-27-1', '2026-27', '2025-26'];
                     available.forEach(s => {
                         const isChecked = data.active_sheets.includes(s) || (data.active_sheets.length === 0 && s.includes('27'));
                         const row = document.createElement('label');
@@ -950,6 +1111,6 @@
     </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="/static/script.js?v=1.1.3"></script>
+    <script src="/static/script.js?v=1.3.1"></script>
 </body>
 </html>

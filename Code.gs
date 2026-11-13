@@ -244,7 +244,7 @@ function getSheetData(sheetName, startRow, numRows) {
     
     // Get headers (row 1 and 2)
     var headerRange = sheet.getRange(1, 1, Math.min(2, lastRow), lastCol);
-    var headers = headerRange.getValues();
+    var headers = headerRange.getDisplayValues();
     
     // Get data rows
     var dataStart = Math.max(startRow || 3, 3); // Data starts at row 3
@@ -255,7 +255,7 @@ function getSheetData(sheetName, startRow, numRows) {
     }
     
     var dataRange = sheet.getRange(dataStart, 1, rowCount, lastCol);
-    var data = dataRange.getValues();
+    var data = dataRange.getDisplayValues();
     
     return {
       success: true,
