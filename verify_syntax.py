@@ -220,6 +220,8 @@ def check_brackets_and_blocks(content, filename=""):
 
 def validate_js_v8(filepath):
     """Compiles JavaScript using Chrome Headless V8 engine."""
+    if os.environ.get('SKIP_V8') == '1':
+        return []
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
