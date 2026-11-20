@@ -121,7 +121,7 @@ function saveFySheetUrls(sheetUrlsObj) {
 }
 
 const DEFAULT_FY_ROW_COUNTS = {
-    '2026-27': 157945,
+    '2026-27': 0,
     '2025-26': 44809,
     '2026-27-1': 3944
 };
@@ -132,8 +132,9 @@ function getSavedFyRowCounts() {
         if (stored) {
             const parsed = JSON.parse(stored);
             if (parsed && typeof parsed === 'object') {
-                if (!parsed['2026-27'] || parseInt(parsed['2026-27'], 10) <= 0) {
-                    parsed['2026-27'] = 157945;
+                if (parsed['2026-27'] === 157945) {
+                    parsed['2026-27'] = 0;
+                    try { localStorage.setItem('sale_purchase_fy_row_counts', JSON.stringify(parsed)); } catch(e){}
                 }
                 return Object.assign({}, DEFAULT_FY_ROW_COUNTS, parsed);
             }
@@ -145,9 +146,6 @@ function getSavedFyRowCounts() {
 function saveFyRowCounts(countsObj) {
     try {
         const safe = Object.assign({}, DEFAULT_FY_ROW_COUNTS, countsObj || {});
-        if (!safe['2026-27'] || parseInt(safe['2026-27'], 10) <= 0) {
-            safe['2026-27'] = 157945;
-        }
         localStorage.setItem('sale_purchase_fy_row_counts', JSON.stringify(safe));
     } catch(e) {}
 }
@@ -1625,38 +1623,30 @@ function updateCapacityIndicators(rowCount) {
 
 
 
-async function fetchAllFYRowCounts() {
-
+async function fetchAllFYRowCounts(forceRefresh = false) {
     try {
-
         const urls = getSavedFyUrls();
-
         const sheetUrls = getSavedFySheetUrls();
-
         const fyKeys = Array.from(new Set([...Object.keys(urls), ...Object.keys(sheetUrls)]));
-
         if (fyKeys.length === 0) return;
 
-
+        const refParam = forceRefresh ? '&refresh=1' : '';
 
         const promises = fyKeys.map(async (fy) => {
-
             const sheetUrl = sheetUrls[fy] || '';
-
             const appUrl = urls[fy] || '';
 
             try {
-
                 // 1. Check directly via server proxy
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 8000);
-                const res = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}`, { signal: controller.signal });
+                const res = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}${refParam}`, { signal: controller.signal });
                 clearTimeout(timeoutId);
                 if (res.ok) {
                     const r = await res.json();
                     let maxRows = 0;
                     if (r && r.success) {
-                        if (r.totalRows !== undefined && parseInt(r.totalRows, 10) > 0) {
+                        if (r.totalRows !== undefined && parseInt(r.totalRows, 10) >= 0) {
                             maxRows = parseInt(r.totalRows, 10);
                         } else if (Array.isArray(r.sheets) && r.sheets.length > 0) {
                             r.sheets.forEach(sh => {
@@ -1664,10 +1654,8 @@ async function fetchAllFYRowCounts() {
                                 if (count > maxRows) maxRows = count;
                             });
                         }
-                    }
-                    if (maxRows <= 0 && fy === '2026-27') maxRows = 157945;
-                    if (maxRows > 0) {
-                        return { fy, maxRows };
+                        const cleanRows = Math.max(0, maxRows <= 2 ? 0 : maxRows);
+                        return { fy, maxRows: cleanRows };
                     }
                 }
             } catch (err) {}
@@ -1686,43 +1674,27 @@ async function fetchAllFYRowCounts() {
                             const count = parseInt(sh.rows, 10) || 0;
                             if (count > maxRows) maxRows = count;
                         });
-                        if (maxRows <= 0 && fy === '2026-27') maxRows = 157945;
-                        if (maxRows > 0) return { fy, maxRows };
+                        const cleanRows = Math.max(0, maxRows <= 2 ? 0 : maxRows);
+                        return { fy, maxRows: cleanRows };
                     }
                 } catch (asErr) {}
             }
 
             // 3. Fallback to baseline default count
-            const defaultBaseline = DEFAULT_FY_ROW_COUNTS[fy] || 0;
-            if (defaultBaseline > 0) {
-                return { fy, maxRows: defaultBaseline };
-            }
-
-            return null;
+            const defaultBaseline = DEFAULT_FY_ROW_COUNTS[fy] !== undefined ? DEFAULT_FY_ROW_COUNTS[fy] : 0;
+            return { fy, maxRows: defaultBaseline };
         });
-
-
 
         const results = await Promise.all(promises);
-
         let updated = false;
-
         results.forEach(res => {
-
             if (res && res.fy) {
-
                 state.fyRowCounts[res.fy] = res.maxRows;
-
                 updated = true;
-
             }
-
         });
 
-
-
         if (updated) {
-
             saveFyRowCounts(state.fyRowCounts);
 
             populateFYSelector();
@@ -1845,127 +1817,68 @@ fetchAllFYRowCounts();
 
 // ─── Load Sheet Names ───────────────────────────────────────────────────
 
-async function refreshSheetDropdown() {
-
+async function refreshSheetDropdown(forceRefresh = false) {
     try {
-
         const fy = state.currentFY || '2026-27';
-
         const sheetUrl = getSheetUrlForFY(fy);
-
         let r = null;
-
-
+        const refParam = forceRefresh ? '&refresh=1' : '';
 
         // 1. Direct Google Sheet Proxy via local server (no Apps Script required)
-
         try {
-
-            const metaRes = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}`);
-
+            const metaRes = await fetch(`/api/view-sheet-data?action=getMetadata&fy=${encodeURIComponent(fy)}&sheetUrl=${encodeURIComponent(sheetUrl)}${refParam}`);
             if (metaRes.ok) {
-
                 const metaData = await metaRes.json();
-
                 if (metaData && metaData.success) {
-
                     r = metaData;
-
                 }
-
             }
-
         } catch (localErr) {
-
             console.warn('[Direct Sheet Meta Error]', localErr);
-
         }
-
-
 
         // 2. Fallback to Apps Script if available and local direct proxy didn't return
-
         if (!r && getActiveWebAppUrl()) {
-
             try {
-
                 const res = await fetch(`${getActiveWebAppUrl()}?action=getSheetNames`);
-
                 if (res.ok) r = await res.json();
-
             } catch (asErr) {
-
                 console.warn('[Apps Script Meta Error]', asErr);
-
             }
-
         }
 
-
-
         if (r && r.success) {
-
             const sel = document.getElementById('sheet-select');
-
             const syncSel = document.getElementById('sync-sheet-select');
-
             const curV = sel ? sel.value : '';
-
             const curSV = syncSel ? syncSel.value : '';
-
-
 
             if(sel) sel.innerHTML = '<option value="">-- Choose sheet --</option>';
 
-
-
             state.availableSheets = r.sheets || [];
-
             if (r.spreadsheetId) {
-
                 state.spreadsheetIds[state.currentFY] = r.spreadsheetId;
-
             }
-
             let fyMaxRows = 0;
-
             r.sheets.forEach(sh => {
-
-                const rCount = parseInt(sh.rows, 10) || 0;
-
+                const rawCount = parseInt(sh.rows, 10) || 0;
+                const rCount = Math.max(0, rawCount <= 2 ? 0 : rawCount);
                 if (rCount > fyMaxRows) fyMaxRows = rCount;
-
                 const cap = getSheetCapacityStatus(rCount);
-
                 let capTag = '';
-
                 if (cap.isCritical) capTag = ' [RED ALERT]';
-
                 else if (cap.level === 'orange') capTag = ' [Orange Alert]';
-
                 else if (cap.level === 'yellow') capTag = ' [Yellow Alert]';
-
                 else capTag = ' [Optimal]';
-
                 const txt = `${sh.name} (${formatRowCount(rCount)})${capTag}`;
-
                 if(sel) { const o=document.createElement('option'); o.value=sh.name; o.textContent=txt; sel.appendChild(o); }
-
             });
 
-
-
-            if (fyMaxRows > 0) {
-
-                state.fyRowCounts[state.currentFY] = fyMaxRows;
-
-                saveFyRowCounts(state.fyRowCounts);
-
-                populateFYSelector();
-
-                updateCapacityIndicators(fyMaxRows);
-
-            }
+            const cleanFyMax = Math.max(0, fyMaxRows <= 2 ? 0 : fyMaxRows);
+            state.fyRowCounts[state.currentFY] = cleanFyMax;
+            saveFyRowCounts(state.fyRowCounts);
+            populateFYSelector();
+            updateCapacityIndicators(cleanFyMax);
 
 
 
@@ -2626,6 +2539,11 @@ async function loadSheetData(startRow, isRefresh = false) {
 
 
 
+    if (isRefresh) {
+        refreshSheetDropdown(true);
+        fetchAllFYRowCounts(true);
+    }
+
     let loadSuccess = false;
 
 
@@ -2808,15 +2726,11 @@ function renderViewerTable() {
 
     tInfo.textContent = `Total: ${formatNumber(state.viewerTotalRows)} rows`;
 
-    if (state.viewerTotalRows > 0) {
-
-        updateCapacityIndicators(state.viewerTotalRows);
-
-        state.fyRowCounts[state.currentFY] = Math.max(state.fyRowCounts[state.currentFY] || 0, state.viewerTotalRows);
-
-        saveFyRowCounts(state.fyRowCounts);
-
-    }
+    const cleanViewerRows = Math.max(0, state.viewerTotalRows <= 2 ? 0 : state.viewerTotalRows);
+    updateCapacityIndicators(cleanViewerRows);
+    state.fyRowCounts[state.currentFY] = cleanViewerRows;
+    saveFyRowCounts(state.fyRowCounts);
+    populateFYSelector();
 
 
 
@@ -3403,7 +3317,7 @@ function closeSyncModal() {
 
 function getKnownSyncSheets() {
     const defaultCounts = {
-        '2026-27': 157945,
+        '2026-27': 0,
         '2025-26': 44809,
         '2026-27-1': 3944
     };
@@ -3414,8 +3328,8 @@ function getKnownSyncSheets() {
             if (Array.isArray(parsed) && parsed.length > 0) {
                 parsed.forEach(sh => {
                     let rCount = parseInt(sh.rows, 10) || 0;
-                    if (rCount <= 0 || (sh.fy === '2026-27' && rCount < 100000)) {
-                        sh.rows = state.fyRowCounts[sh.fy] || defaultCounts[sh.fy] || 157945;
+                    if (sh.fy === '2026-27' && rCount === 157945) {
+                        sh.rows = state.fyRowCounts[sh.fy] !== undefined ? state.fyRowCounts[sh.fy] : 0;
                     }
                 });
                 return parsed;
@@ -3433,8 +3347,7 @@ function getKnownSyncSheets() {
         const sUrl = (sheetUrls[fy] || '').trim();
         const targetUrl = url || sUrl;
         if (!targetUrl) return;
-        let rows = parseInt(rowCounts[fy] || defaultCounts[fy] || '0', 10);
-        if (fy === '2026-27' && (rows <= 0 || rows < 100000)) rows = 157945;
+        let rows = parseInt(rowCounts[fy] !== undefined ? rowCounts[fy] : (defaultCounts[fy] || 0), 10);
         list.push({
             fy: fy,
             name: `AJ&MY&FK SALE-PURCHASE ${fy}`,
@@ -3449,14 +3362,14 @@ let _customSyncSheets = [];
 
 function renderCustomSyncDropdown(sheets, keepSelectedVal = null) {
     const defaultCounts = {
-        '2026-27': 157945,
+        '2026-27': 0,
         '2025-26': 44809,
         '2026-27-1': 3944
     };
     _customSyncSheets = (sheets || []).map(sh => {
         let rows = parseInt(sh.rows, 10) || 0;
-        if (rows <= 0 || (sh.fy === '2026-27' && rows < 100000)) {
-            rows = state.fyRowCounts[sh.fy] || defaultCounts[sh.fy] || 157945;
+        if (sh.fy === '2026-27' && rows === 157945) {
+            rows = state.fyRowCounts[sh.fy] !== undefined ? state.fyRowCounts[sh.fy] : 0;
         }
         return Object.assign({}, sh, { rows: rows });
     });
@@ -3679,10 +3592,8 @@ async function refreshSyncDropdown(silent = false) {
         results.forEach(resObj => {
             if (resObj && resObj.sheets) {
                 resObj.sheets.forEach(sh => {
-                    let rowCount = parseInt(sh.rows, 10) || 0;
-                    if (rowCount <= 0 || (resObj.fy === '2026-27' && rowCount < 100000)) {
-                        rowCount = state.fyRowCounts[resObj.fy] || DEFAULT_FY_ROW_COUNTS[resObj.fy] || 157945;
-                    }
+                    let rawCount = parseInt(sh.rows, 10) || 0;
+                    let rowCount = Math.max(0, rawCount <= 2 ? 0 : rawCount);
                     compiledSheets.push({
                         fy: resObj.fy,
                         url: resObj.url,

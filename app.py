@@ -1881,9 +1881,11 @@ def api_view_sheet_data():
     # Handle action: getMetadata
     if action == 'getMetadata':
         cache_key = f"{fy}_{sid}"
+        if force_refresh and cache_key in _sheet_metadata_cache:
+            del _sheet_metadata_cache[cache_key]
         if not force_refresh and cache_key in _sheet_metadata_cache:
             c_time, c_data = _sheet_metadata_cache[cache_key]
-            if time.time() - c_time < 300:  # 5 minutes in-memory fast TTL
+            if time.time() - c_time < 60:  # 1 minute in-memory fast TTL
                 response = jsonify(c_data)
                 response.headers.add("Access-Control-Allow-Origin", "*")
                 return response
@@ -1900,13 +1902,11 @@ def api_view_sheet_data():
                         sheets = as_json.get('sheets', [])
                         m_rows = 0
                         for s in sheets:
-                            s_rows = int(s.get('rows', 0) or 0)
+                            raw_s_rows = int(s.get('rows', 0) or 0)
+                            s_rows = max(0, raw_s_rows - 2 if raw_s_rows > 2 else 0)
+                            s['rows'] = s_rows
                             if s_rows > m_rows:
                                 m_rows = s_rows
-                        if m_rows <= 0 and fy == '2026-27':
-                            m_rows = 157945
-                            if sheets:
-                                sheets[0]['rows'] = 157945
                         as_json['totalRows'] = m_rows
                         _sheet_metadata_cache[cache_key] = (time.time(), as_json)
                         response = jsonify(as_json)
@@ -1919,12 +1919,9 @@ def api_view_sheet_data():
         total_rows = 0
         try:
             _, raw_data = _fetch_sheet_raw_csv_cached(sid, gid, force=force_refresh)
-            total_rows = len(raw_data)
+            total_rows = max(0, len(raw_data) - 2 if len(raw_data) > 2 else 0)
         except Exception as ce:
             print(f"[VIEW SHEET META] Raw export load failed: {ce}", flush=True)
-
-        if total_rows <= 0 and fy == '2026-27':
-            total_rows = 157945
 
         sheets_list = []
         try:
