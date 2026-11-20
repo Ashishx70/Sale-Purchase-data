@@ -21,8 +21,8 @@ TURSO_AUTH_TOKEN = os.environ.get(
 TURSO_PLATFORM_API_TOKEN = os.environ.get(
     "TURSO_PLATFORM_API_TOKEN"
 ) or os.environ.get(
-    "TURSO_API_TOKEN"
-) or "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI2cjJZVU9UOEVmR1Z2dllERWJoUkd3Iiwib3JnX2lkIjoxMDAwMzAyMjMzfQ.466WCrSiELbd-H_BuH-AyF5XoMwkXgytO_uvHt1D6pqomd59GSLEC8qbScknEdOx5Yt2EPMwNhMBCu9GGJUUAA"
+    "TURSO_API_TOKEN", ""
+)
 
 TURSO_ORG_SLUG = os.environ.get("TURSO_ORG_SLUG", "ashishx70")
 
@@ -408,9 +408,22 @@ def get_platform_usage(force_refresh=False):
     if not force_refresh and _usage_cache["data"] and (now - _usage_cache["timestamp"] < 30):
         return _usage_cache["data"]
 
+    token = os.environ.get("TURSO_PLATFORM_API_TOKEN") or os.environ.get("TURSO_API_TOKEN") or TURSO_PLATFORM_API_TOKEN
+    if not token or not token.strip():
+        return {
+            "success": False,
+            "configured": False,
+            "plan": "starter",
+            "plan_label": "Starter Plan",
+            "rows_read": {"raw": 0, "formatted": "0", "limit_raw": 500_000_000, "limit_formatted": "500M", "percent": 0.0},
+            "rows_written": {"raw": 0, "formatted": "0", "limit_raw": 10_000_000, "limit_formatted": "10M", "percent": 0.0},
+            "syncs": {"raw": 0, "formatted": "0 B", "limit_raw": 3_000_000_000, "limit_formatted": "3 GB", "percent": 0.0},
+            "storage": {"raw": 0, "formatted": "0 B", "limit_raw": 5_000_000_000, "limit_formatted": "5 GB", "percent": 0.0}
+        }
+
     url = f"https://api.turso.tech/v1/organizations/{TURSO_ORG_SLUG}/usage"
     headers = {
-        "Authorization": f"Bearer {TURSO_PLATFORM_API_TOKEN}",
+        "Authorization": f"Bearer {token.strip()}",
         "Accept": "application/json"
     }
 
