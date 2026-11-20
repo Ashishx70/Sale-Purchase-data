@@ -914,7 +914,8 @@ def export_to_excel_streaming(output_path):
     from openpyxl.cell import WriteOnlyCell
     wb = openpyxl.Workbook(write_only=True)
     fy = get_financial_year()
-    ws = wb.create_sheet(title=f'AJIO & MYNTRA SALE-PURCHASE {fy}')
+    sheet_title = f'SALE-PURCHASE {fy}'[:31]
+    ws = wb.create_sheet(title=sheet_title)
     
     # Define styles
     header_font = Font(name='Calibri', bold=True, size=12, color='FFFFFF')
@@ -951,8 +952,21 @@ def export_to_excel_streaming(output_path):
                 cell.alignment = center_align
         row1.append(cell)
     ws.append(row1)
-    ws.merge_cells('A1:AL1')
-    ws.merge_cells('AN1:BR1')
+    
+    # WriteOnlyWorksheet uses merged_cells.add() instead of ws.merge_cells()
+    try:
+        ws.merged_cells.add('A1:AL1')
+        ws.merged_cells.add('AN1:BR1')
+    except Exception:
+        try:
+            ws.merged_cells.ranges.add('A1:AL1')
+            ws.merged_cells.ranges.add('AN1:BR1')
+        except Exception:
+            try:
+                ws.merge_cells('A1:AL1')
+                ws.merge_cells('AN1:BR1')
+            except Exception:
+                pass
     
     # ─── Row 2: Column Headers ──────────────────────────────────────────
     sale_headers = [
