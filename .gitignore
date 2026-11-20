@@ -21,4 +21,5 @@ supabase_session.json
 scratch/
 test_crop.png
 user_screen_crop.png
+se-metadata.json
 

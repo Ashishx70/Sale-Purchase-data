@@ -3325,6 +3325,13 @@ def supabase_cache_status():
         is_expired = True
         active_sheets = []
         
+    platform_usage = {}
+    try:
+        from turso_client import get_platform_usage
+        platform_usage = get_platform_usage()
+    except Exception as u_err:
+        print(f"[TURSO USAGE FETCH ERR]: {u_err}", flush=True)
+
     res_data = {
         "status": "Success",
         "available_sheets": available_sheets,
@@ -3336,9 +3343,28 @@ def supabase_cache_status():
         "is_expired": is_expired,
         "mode": "persistent",
         "ttl_hours": "Month-End",
-        "engine": "Turso (libSQL SQLite Cloud 5GB)"
+        "engine": "Turso (libSQL SQLite Cloud 5GB)",
+        "platform_usage": platform_usage
     }
     resp = jsonify(res_data)
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp
+
+@app.route('/api/turso-usage', methods=['GET', 'OPTIONS'])
+def turso_usage_endpoint():
+    if request.method == 'OPTIONS':
+        res = jsonify({"status": "Success"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        res.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        res.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return res
+    force_refresh = request.args.get('refresh', 'false').lower() in ('true', '1')
+    try:
+        from turso_client import get_platform_usage
+        usage = get_platform_usage(force_refresh=force_refresh)
+        resp = jsonify(usage)
+    except Exception as e:
+        resp = jsonify({"success": False, "error": str(e)})
     resp.headers.add("Access-Control-Allow-Origin", "*")
     return resp
 

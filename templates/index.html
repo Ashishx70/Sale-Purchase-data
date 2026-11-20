@@ -782,7 +782,7 @@
 
     <!-- Turso Working Cache Manager Modal -->
     <div id="supabase-modal-overlay" class="modal-overlay hidden" style="backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: rgba(15, 23, 42, 0.65); z-index: 99999;">
-        <div class="modal-card" style="width: 540px; border-radius: 20px; padding: 26px; box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25); background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid rgba(255, 255, 255, 0.7);">
+        <div class="modal-card" style="width: 560px; max-width: 95vw; border-radius: 20px; padding: 26px; box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25); background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border: 1px solid rgba(255, 255, 255, 0.7);">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 1px solid rgba(226, 232, 240, 0.8); padding-bottom: 14px;">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div style="width: 42px; height: 42px; border-radius: 12px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.28); display: flex; align-items: center; justify-content: center; color: #059669; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.15);">
@@ -829,6 +829,106 @@
                         </svg>
                         <span style="font-size: 0.78rem; font-weight: 600;">Session Remaining:</span>
                         <strong id="sb-timer-left">--</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Turso Cloud Resource Usage (4 Live Metrics) -->
+            <div id="turso-usage-box" style="background: rgba(248, 250, 252, 0.75); border: 1px solid rgba(226, 232, 240, 0.8); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                        </svg>
+                        <span style="font-size: 0.78rem; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">Turso Usage &amp; Quota</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button type="button" onclick="refreshTursoUsage()" title="Refresh Usage" style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 6px; padding: 2px 7px; cursor: pointer; color: #64748b; display: flex; align-items: center; gap: 4px; font-size: 0.72rem; font-weight: 700; transition: all 0.2s;" onmouseover="this.style.color='#0284c7'; this.style.borderColor='rgba(14, 165, 233, 0.4)';" onmouseout="this.style.color='#64748b'; this.style.borderColor='rgba(148, 163, 184, 0.25)';">
+                            <svg id="turso-refresh-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <polyline points="1 20 1 14 7 14"></polyline>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                            <span>Live</span>
+                        </button>
+                        <span id="turso-plan-badge" style="font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(14, 165, 233, 0.25); color: #0284c7;">Starter (5 GB)</span>
+                    </div>
+                </div>
+
+                <!-- 4 Turso Metric Cards in 2x2 Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <!-- Rows Read -->
+                    <div style="background: rgba(255, 255, 255, 0.85); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px 12px; box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.04);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="font-size: 0.74rem; color: #64748b; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                                Rows Read
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                            </span>
+                            <span id="turso-read-pct" style="font-size: 0.7rem; font-weight: 700; color: #475569;">0%</span>
+                        </div>
+                        <div style="display: flex; align-items: baseline; gap: 4px;">
+                            <span id="turso-read-val" style="font-size: 1.15rem; font-weight: 800; color: #0f172a;">--</span>
+                            <span id="turso-read-limit" style="font-size: 0.78rem; font-weight: 700; color: #94a3b8;">/ 500M</span>
+                        </div>
+                        <div style="height: 5px; background: rgba(226, 232, 240, 0.85); border-radius: 4px; overflow: hidden; margin-top: 6px;">
+                            <div id="turso-read-bar" style="height: 100%; border-radius: 4px; background: #0f172a; width: 0%; transition: width 0.4s ease;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Rows Written -->
+                    <div style="background: rgba(255, 255, 255, 0.85); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px 12px; box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.04);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="font-size: 0.74rem; color: #64748b; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                                Rows Written
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                            </span>
+                            <span id="turso-written-pct" style="font-size: 0.7rem; font-weight: 700; color: #475569;">0%</span>
+                        </div>
+                        <div style="display: flex; align-items: baseline; gap: 4px;">
+                            <span id="turso-written-val" style="font-size: 1.15rem; font-weight: 800; color: #0f172a;">--</span>
+                            <span id="turso-written-limit" style="font-size: 0.78rem; font-weight: 700; color: #94a3b8;">/ 10M</span>
+                        </div>
+                        <div style="height: 5px; background: rgba(226, 232, 240, 0.85); border-radius: 4px; overflow: hidden; margin-top: 6px;">
+                            <div id="turso-written-bar" style="height: 100%; border-radius: 4px; background: #0f172a; width: 0%; transition: width 0.4s ease;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Syncs -->
+                    <div style="background: rgba(255, 255, 255, 0.85); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px 12px; box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.04);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="font-size: 0.74rem; color: #64748b; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                                Syncs
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                            </span>
+                            <span id="turso-syncs-pct" style="font-size: 0.7rem; font-weight: 700; color: #475569;">0%</span>
+                        </div>
+                        <div style="display: flex; align-items: baseline; gap: 4px;">
+                            <span id="turso-syncs-val" style="font-size: 1.15rem; font-weight: 800; color: #0f172a;">--</span>
+                            <span id="turso-syncs-limit" style="font-size: 0.78rem; font-weight: 700; color: #94a3b8;">/ 3 GB</span>
+                        </div>
+                        <div style="height: 5px; background: rgba(226, 232, 240, 0.85); border-radius: 4px; overflow: hidden; margin-top: 6px;">
+                            <div id="turso-syncs-bar" style="height: 100%; border-radius: 4px; background: #0f172a; width: 0%; transition: width 0.4s ease;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Storage -->
+                    <div style="background: rgba(255, 255, 255, 0.85); border: 1px solid rgba(226, 232, 240, 0.9); border-radius: 10px; padding: 10px 12px; box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.04);">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                            <span style="font-size: 0.74rem; color: #64748b; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                                Storage
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                            </span>
+                            <span id="turso-storage-pct" style="font-size: 0.7rem; font-weight: 700; color: #475569;">0%</span>
+                        </div>
+                        <div style="display: flex; align-items: baseline; gap: 4px;">
+                            <span id="turso-storage-val" style="font-size: 1.15rem; font-weight: 800; color: #0f172a;">--</span>
+                            <span id="turso-storage-limit" style="font-size: 0.78rem; font-weight: 700; color: #94a3b8;">/ 5 GB</span>
+                        </div>
+                        <div style="height: 5px; background: rgba(226, 232, 240, 0.85); border-radius: 4px; overflow: hidden; margin-top: 6px;">
+                            <div id="turso-storage-bar" style="height: 100%; border-radius: 4px; background: #0f172a; width: 0%; transition: width 0.4s ease;"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -958,6 +1058,83 @@
             document.querySelectorAll('.sb-sheet-checkbox').forEach(cb => cb.checked = val);
         }
 
+        function updateTursoUsageUI(usage) {
+            if (!usage) return;
+            const readVal = document.getElementById('turso-read-val');
+            const readLimit = document.getElementById('turso-read-limit');
+            const readBar = document.getElementById('turso-read-bar');
+            const readPct = document.getElementById('turso-read-pct');
+
+            const writtenVal = document.getElementById('turso-written-val');
+            const writtenLimit = document.getElementById('turso-written-limit');
+            const writtenBar = document.getElementById('turso-written-bar');
+            const writtenPct = document.getElementById('turso-written-pct');
+
+            const syncsVal = document.getElementById('turso-syncs-val');
+            const syncsLimit = document.getElementById('turso-syncs-limit');
+            const syncsBar = document.getElementById('turso-syncs-bar');
+            const syncsPct = document.getElementById('turso-syncs-pct');
+
+            const storageVal = document.getElementById('turso-storage-val');
+            const storageLimit = document.getElementById('turso-storage-limit');
+            const storageBar = document.getElementById('turso-storage-bar');
+            const storagePct = document.getElementById('turso-storage-pct');
+
+            const planBadge = document.getElementById('turso-plan-badge');
+
+            if (usage.plan_label && planBadge) {
+                planBadge.textContent = usage.plan_label;
+            }
+
+            if (usage.rows_read && readVal) {
+                readVal.textContent = usage.rows_read.formatted || '0';
+                if (readLimit) readLimit.textContent = ' / ' + (usage.rows_read.limit_formatted || '500M');
+                const pct = Math.min(100, Math.max(usage.rows_read.raw > 0 ? 1 : 0, usage.rows_read.percent || 0));
+                if (readBar) readBar.style.width = pct + '%';
+                if (readPct) readPct.textContent = (usage.rows_read.percent || 0) + '%';
+            }
+
+            if (usage.rows_written && writtenVal) {
+                writtenVal.textContent = usage.rows_written.formatted || '0';
+                if (writtenLimit) writtenLimit.textContent = ' / ' + (usage.rows_written.limit_formatted || '10M');
+                const pct = Math.min(100, Math.max(usage.rows_written.raw > 0 ? 1 : 0, usage.rows_written.percent || 0));
+                if (writtenBar) writtenBar.style.width = pct + '%';
+                if (writtenPct) writtenPct.textContent = (usage.rows_written.percent || 0) + '%';
+            }
+
+            if (usage.syncs && syncsVal) {
+                syncsVal.textContent = usage.syncs.formatted || '0 B';
+                if (syncsLimit) syncsLimit.textContent = ' / ' + (usage.syncs.limit_formatted || '3 GB');
+                const pct = Math.min(100, usage.syncs.percent || 0);
+                if (syncsBar) syncsBar.style.width = pct + '%';
+                if (syncsPct) syncsPct.textContent = (usage.syncs.percent || 0) + '%';
+            }
+
+            if (usage.storage && storageVal) {
+                storageVal.textContent = usage.storage.formatted || '0 B';
+                if (storageLimit) storageLimit.textContent = ' / ' + (usage.storage.limit_formatted || '5 GB');
+                const pct = Math.min(100, Math.max(usage.storage.raw > 0 ? 1 : 0, usage.storage.percent || 0));
+                if (storageBar) storageBar.style.width = pct + '%';
+                if (storagePct) storagePct.textContent = (usage.storage.percent || 0) + '%';
+            }
+        }
+
+        async function refreshTursoUsage() {
+            const icon = document.getElementById('turso-refresh-icon');
+            if (icon) {
+                icon.style.transition = 'transform 0.6s ease';
+                icon.style.transform = 'rotate(360deg)';
+                setTimeout(() => { icon.style.transform = ''; }, 600);
+            }
+            try {
+                const res = await fetch('/api/turso-usage?refresh=true');
+                const usage = await res.json();
+                updateTursoUsageUI(usage);
+            } catch (e) {
+                console.error("Failed to refresh Turso usage:", e);
+            }
+        }
+
         async function loadSupabaseStatus() {
             const badge = document.getElementById('sb-status-badge');
             const saleEl = document.getElementById('sb-sale-count');
@@ -971,6 +1148,11 @@
                 const res = await fetch('/api/supabase-cache-status');
                 const data = await res.json();
                 if (data.status === 'Success') {
+                    if (data.platform_usage) {
+                        updateTursoUsageUI(data.platform_usage);
+                    } else {
+                        refreshTursoUsage();
+                    }
                     const saleCount = Number(data.sale_count) || 0;
                     const purchCount = Number(data.purchase_count) || 0;
                     const totalCount = saleCount + purchCount;

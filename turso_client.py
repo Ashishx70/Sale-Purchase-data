@@ -18,6 +18,14 @@ TURSO_AUTH_TOKEN = os.environ.get(
     "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ1ODEyOTMsImlkIjoiMDFhMWQ1NjAtMmIwMS03ZmZhLWJlNDktYTlmMDBiNzNmY2MyIiwia2lkIjoianBTUEJoNkJBcHcwVXN2Mmx5eWZPRUpBZWpiaF9VVlp4d2x6MGZwT1lBRSIsInJpZCI6IjFlMzFmZTc4LTU4MTItNDkxNi1hYmI1LWUzZDgzZDAxNTA2YyJ9.qOHHq62dlCuJ527kuawkcaaOHKTR5IdStrWRG5gUcHz3xFPI-td6RaYTOdInv-ZriJNhx3dTjUntuU0R-O2gCw"
 )
 
+TURSO_PLATFORM_API_TOKEN = os.environ.get(
+    "TURSO_PLATFORM_API_TOKEN"
+) or os.environ.get(
+    "TURSO_API_TOKEN"
+) or "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI2cjJZVU9UOEVmR1Z2dllERWJoUkd3Iiwib3JnX2lkIjoxMDAwMzAyMjMzfQ.466WCrSiELbd-H_BuH-AyF5XoMwkXgytO_uvHt1D6pqomd59GSLEC8qbScknEdOx5Yt2EPMwNhMBCu9GGJUUAA"
+
+TURSO_ORG_SLUG = os.environ.get("TURSO_ORG_SLUG", "ashishx70")
+
 # Persistent HTTP Session with connection pooling
 _session = requests.Session()
 _adapter = HTTPAdapter(
@@ -362,3 +370,121 @@ def query_turso_lookup(keys, is_sale=True, chunk_size=300):
             print(f"[TURSO LOOKUP EXCEPTION]: {e}", flush=True)
 
     return mapping
+
+
+_usage_cache = {
+    "timestamp": 0,
+    "data": None
+}
+
+
+def format_turso_count(n):
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.2f}B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.2f}K"
+    return str(n)
+
+
+def format_turso_bytes(b):
+    if b >= 1_000_000_000:
+        return f"{b / 1_000_000_000:.2f} GB"
+    if b >= 1_000_000:
+        return f"{b / 1_000_000:.2f} MB"
+    if b >= 1_000:
+        return f"{b / 1_000:.2f} KB"
+    return f"{b} B"
+
+
+def get_platform_usage(force_refresh=False):
+    """
+    Fetch Turso organization resource usage (Rows Read, Rows Written, Syncs, Storage)
+    via Turso Platform Management API. Caches response for 30s.
+    """
+    global _usage_cache
+    now = time.time()
+    if not force_refresh and _usage_cache["data"] and (now - _usage_cache["timestamp"] < 30):
+        return _usage_cache["data"]
+
+    url = f"https://api.turso.tech/v1/organizations/{TURSO_ORG_SLUG}/usage"
+    headers = {
+        "Authorization": f"Bearer {TURSO_PLATFORM_API_TOKEN}",
+        "Accept": "application/json"
+    }
+
+    try:
+        r = _session.get(url, headers=headers, timeout=8)
+        if r.status_code == 200:
+            res_json = r.json()
+            total = res_json.get("total", {})
+            
+            rows_read = total.get("rows_read", 0)
+            rows_written = total.get("rows_written", 0)
+            storage_bytes = total.get("storage_bytes", 0)
+            bytes_synced = total.get("bytes_synced", 0)
+            
+            limit_rows_read = 500_000_000
+            limit_rows_written = 10_000_000
+            limit_syncs_bytes = 3_000_000_000
+            limit_storage_bytes = 5_000_000_000
+
+            pct_read = round(min(100.0, (rows_read / limit_rows_read) * 100), 2) if limit_rows_read else 0.0
+            pct_written = round(min(100.0, (rows_written / limit_rows_written) * 100), 2) if limit_rows_written else 0.0
+            pct_synced = round(min(100.0, (bytes_synced / limit_syncs_bytes) * 100), 2) if limit_syncs_bytes else 0.0
+            pct_storage = round(min(100.0, (storage_bytes / limit_storage_bytes) * 100), 2) if limit_storage_bytes else 0.0
+
+            data = {
+                "success": True,
+                "plan": "starter",
+                "plan_label": "Starter Plan",
+                "rows_read": {
+                    "raw": rows_read,
+                    "formatted": format_turso_count(rows_read),
+                    "limit_raw": limit_rows_read,
+                    "limit_formatted": "500M",
+                    "percent": pct_read
+                },
+                "rows_written": {
+                    "raw": rows_written,
+                    "formatted": format_turso_count(rows_written),
+                    "limit_raw": limit_rows_written,
+                    "limit_formatted": "10M",
+                    "percent": pct_written
+                },
+                "syncs": {
+                    "raw": bytes_synced,
+                    "formatted": format_turso_bytes(bytes_synced),
+                    "limit_raw": limit_syncs_bytes,
+                    "limit_formatted": "3 GB",
+                    "percent": pct_synced
+                },
+                "storage": {
+                    "raw": storage_bytes,
+                    "formatted": format_turso_bytes(storage_bytes),
+                    "limit_raw": limit_storage_bytes,
+                    "limit_formatted": "5 GB",
+                    "percent": pct_storage
+                }
+            }
+            _usage_cache["timestamp"] = now
+            _usage_cache["data"] = data
+            return data
+        else:
+            print(f"[TURSO USAGE API ERROR] HTTP {r.status_code}: {r.text}", flush=True)
+    except Exception as e:
+        print(f"[TURSO USAGE API EXCEPTION]: {e}", flush=True)
+
+    if _usage_cache["data"]:
+        return _usage_cache["data"]
+
+    return {
+        "success": False,
+        "plan": "starter",
+        "plan_label": "Starter Plan",
+        "rows_read": {"raw": 0, "formatted": "0", "limit_raw": 500_000_000, "limit_formatted": "500M", "percent": 0.0},
+        "rows_written": {"raw": 0, "formatted": "0", "limit_raw": 10_000_000, "limit_formatted": "10M", "percent": 0.0},
+        "syncs": {"raw": 0, "formatted": "0 B", "limit_raw": 3_000_000_000, "limit_formatted": "3 GB", "percent": 0.0},
+        "storage": {"raw": 0, "formatted": "0 B", "limit_raw": 5_000_000_000, "limit_formatted": "5 GB", "percent": 0.0}
+    }
