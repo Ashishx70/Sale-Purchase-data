@@ -932,7 +932,7 @@ def export_to_excel_streaming(output_path):
     
     # ─── Row 1: Merged Headers ──────────────────────────────────────────
     row1 = []
-    for col_idx in range(1, 72):
+    for col_idx in range(1, 71):
         cell = WriteOnlyCell(ws, value=None)
         cell.border = thin_border
         
@@ -991,7 +991,7 @@ def export_to_excel_streaming(output_path):
     ]
     
     row2 = []
-    for col_idx in range(1, 72):
+    for col_idx in range(1, 71):
         cell = WriteOnlyCell(ws, value=None)
         cell.border = thin_border
         
@@ -999,8 +999,9 @@ def export_to_excel_streaming(output_path):
             cell.fill = sale_subheader_fill
             cell.font = subheader_font
             cell.alignment = center_align
-            if col_idx <= len(sale_headers):
-                cell.value = sale_headers[col_idx - 1]
+            s_idx = col_idx - 1
+            if 0 <= s_idx < len(sale_headers):
+                cell.value = sale_headers[s_idx]
         elif col_idx == 39:
             pass
         else:
@@ -1008,7 +1009,7 @@ def export_to_excel_streaming(output_path):
             cell.font = subheader_font
             cell.alignment = center_align
             p_idx = col_idx - 40
-            if p_idx < len(purchase_headers):
+            if 0 <= p_idx < len(purchase_headers):
                 cell.value = purchase_headers[p_idx]
         row2.append(cell)
     ws.append(row2)
@@ -1051,26 +1052,30 @@ def export_to_excel_streaming(output_path):
             break
             
         row_cells = []
-        for col_idx in range(1, 72):
+        for col_idx in range(1, 71):
             cell = WriteOnlyCell(ws, value=None)
             cell.border = thin_border
             
             if col_idx <= 38:
                 if s_row is not None:
-                    k = sale_keys[col_idx - 1]
-                    cell.value = s_row[k]
+                    s_idx = col_idx - 1
+                    if 0 <= s_idx < len(sale_keys):
+                        k = sale_keys[s_idx]
+                        cell.value = s_row[k]
             elif col_idx == 39:
                 pass
             else:
                 if p_row is not None:
-                    k = purchase_keys[col_idx - 40]
-                    cell.value = p_row[k]
+                    p_idx = col_idx - 40
+                    if 0 <= p_idx < len(purchase_keys):
+                        k = purchase_keys[p_idx]
+                        cell.value = p_row[k]
             row_cells.append(cell)
         ws.append(row_cells)
         
     conn.close()
     
-    for col in range(1, 72):
+    for col in range(1, 71):
         ws.column_dimensions[get_column_letter(col)].width = 15
     ws.column_dimensions['K'].width = 40
     ws.column_dimensions['AW'].width = 40
