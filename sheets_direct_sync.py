@@ -6,8 +6,14 @@ import base64
 import requests
 import traceback
 from threading import Thread
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
+try:
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
+    GOOGLE_LIBS_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    Credentials = None
+    build = None
+    GOOGLE_LIBS_AVAILABLE = False
 
 WORKSPACE = os.path.dirname(os.path.abspath(__file__))
 SERVICE_ACCOUNT_KEY_PATH = os.path.join(WORKSPACE, 'flipkart-gmail-otp-reader-d7c1a22b35c6.json')
@@ -79,6 +85,8 @@ def get_service_account_info_cached():
 
 def is_direct_sync_available():
     """Check if direct Google Sheets API sync is available."""
+    if not GOOGLE_LIBS_AVAILABLE:
+        return False
     info = get_service_account_info_cached()
     return bool(info and info.get('client_email'))
 
@@ -87,6 +95,8 @@ def get_sheets_service():
     global _cached_service
     if _cached_service is not None:
         return _cached_service
+    if not GOOGLE_LIBS_AVAILABLE:
+        raise ImportError("Google API client libraries are not installed. Please install google-api-python-client and google-auth.")
     info = get_service_account_info_cached()
     if not info:
         raise ValueError("Service account JSON key not found in environment or workspace.")
